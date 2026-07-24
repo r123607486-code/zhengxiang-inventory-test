@@ -1659,11 +1659,15 @@ async function tryImportKybSheet(wb, statusEl){
 
   const dataRows = detected.rows.slice(detected.headerRowIndex + 1);
   const merged = new Map();
+  let skippedNoteCount = 0;
   dataRows.forEach(row=>{
     if(!row) return;
     const modelRaw = row[modelIdx];
     const modelStr = (modelRaw==null?"":modelRaw).toString().trim();
     if(!modelStr) return;
+    // 報價單常常在車型欄下方接一段免責聲明／注意事項文字（跟車型同一欄），
+    // 車型名稱通常很短，這種備註文字明顯很長，用長度判斷跳過，避免被誤當成車型匯入。
+    if(modelStr.length > 30){ skippedNoteCount++; return; }
     const toNum = (v)=> (v===null||v===undefined||v==="") ? null : Number(v);
     merged.set(norm(modelStr), {
       carModel: modelStr,
@@ -1674,7 +1678,7 @@ async function tryImportKybSheet(wb, statusEl){
   });
 
   const rowsToApply = Array.from(merged.values());
-  statusEl.textContent = `偵測到KYB報價單，共 ${rowsToApply.length} 筆車型，匯入中...`;
+  statusEl.textContent = `偵測到KYB報價單，共 ${rowsToApply.length} 筆車型${skippedNoteCount?`（已跳過看起來像備註文字的 ${skippedNoteCount} 列）`:""}，匯入中...`;
 
   let created = 0, updated = 0;
   let batch = db.batch();
@@ -1699,7 +1703,7 @@ async function tryImportKybSheet(wb, statusEl){
   }
   if(opCount > 0) await batch.commit();
 
-  statusEl.textContent = `KYB報價單匯入完成！新增 ${created} 筆車型、更新 ${updated} 筆價格。`;
+  statusEl.textContent = `KYB報價單匯入完成！新增 ${created} 筆車型、更新 ${updated} 筆價格${skippedNoteCount?`（已跳過看起來像備註文字的 ${skippedNoteCount} 列）`:""}。`;
   return true;
 }
 
@@ -1825,8 +1829,9 @@ function renderKybMaster(){
       <td class="editable-cell kyb-catalog-cell" data-id="${it.id}">${it.catalogPrice!=null?it.catalogPrice:"未填"}</td>
       <td class="editable-cell kyb-warranty-cell" data-id="${it.id}">${it.warrantyPrice!=null?it.warrantyPrice:"未填"}</td>
       <td>${escapeHtml(it.remark||"")}</td>
+      <td>${currentUser.role==='admin' ? `<button data-del="${it.id}" data-model="${escapeHtml(it.carModel)}">刪除</button>` : ""}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="8" class="empty">尚無資料</td></tr>`;
+  }).join("") || `<tr><td colspan="9" class="empty">尚無資料</td></tr>`;
 
   body.querySelectorAll(".loc-line").forEach(el=>{
     el.addEventListener("click", ()=> openKybLocationModal(el.dataset.id, el.dataset.code));
@@ -1835,10 +1840,26 @@ function renderKybMaster(){
     body.querySelectorAll(".kyb-list-cell").forEach(td=> td.addEventListener("click", ()=> editKybPrice(td.dataset.id, "listPrice", "訂價")));
     body.querySelectorAll(".kyb-catalog-cell").forEach(td=> td.addEventListener("click", ()=> editKybPrice(td.dataset.id, "catalogPrice", "牌價")));
     body.querySelectorAll(".kyb-warranty-cell").forEach(td=> td.addEventListener("click", ()=> editKybPrice(td.dataset.id, "warrantyPrice", "保修廠")));
+    body.querySelectorAll("[data-del]").forEach(b=> b.addEventListener("click", ()=> deleteKybItem(b.dataset.del, b.dataset.model)));
   } else {
     body.querySelectorAll(".kyb-list-cell,.kyb-catalog-cell,.kyb-warranty-cell").forEach(td=> td.classList.remove("editable-cell"));
   }
   window._kybMasterFilteredList = list;
+}
+
+// 刪除一個KYB車型品項（例如匯入時誤把報價單裡的免責聲明文字當成車型匯進來，需要手動清掉）
+function deleteKybItem(itemId, carModel){
+  if(currentUser.role !== "admin") return;
+  const item = kybItemsCache.find(i=>i.id===itemId);
+  if(!item) return;
+  const qty = kybTotalQty(item);
+  if(qty > 0){
+    alert(`「${carModel}」目前還有庫存（共 ${qty}），請先到儲位管理把庫存搬空或歸零，再刪除這個車型。`);
+    return;
+  }
+  if(!confirm(`確定要刪除車型「${carModel}」嗎？此動作無法復原。`)) return;
+  db.collection("kybItems").doc(itemId).delete()
+    .catch(e=>alert("刪除失敗："+e.message));
 }
 
 // 點擊某個儲位：因為KYB沒有生產批次，這裡就是單純的「搬出數量到別的儲位」
