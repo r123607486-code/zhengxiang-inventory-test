@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+<title>正享有限公司庫存管理系統</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Layer 0+1：啟動畫面 + 登入 -->
+<div id="splash">
+  <div class="login-box">
+    <img class="logo" src="正享LOGO.png" alt="正享有限公司">
+    <h1>庫存管理系統</h1>
+    <input type="text" id="loginUsername" placeholder="帳號" autocomplete="username">
+    <input type="password" id="loginPassword" placeholder="密碼" autocomplete="current-password">
+    <button id="loginBtn">登入</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- 主畫面 -->
+<div id="app" class="hidden">
+  <header class="topbar">
+    <img class="logo" src="正享LOGO.png" alt="正享">
+    <div class="title">正享庫存管理系統</div>
+    <div class="actions">
+      <span class="who" id="whoLabel"></span>
+      <button class="logout" id="changePwBtn">改密碼</button>
+      <button class="logout" id="logoutBtn">登出</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs"></nav>
+
+  <main>
+    <div class="banner hidden" id="backupBanner">
+      <span>今天是星期五，記得匯出本週資料備份喔。</span>
+      <button id="dismissBanner">知道了</button>
+    </div>
+    <div class="banner hidden" id="ordersBanner">
+      <span id="ordersBannerText"></span>
+      <button id="dismissOrdersBanner">前往確認</button>
+    </div>
+
+    <!-- 庫存查詢 -->
+    <section class="page" id="page-query">
+      <div class="page-head">
+        <div class="toolbar">
+          <input type="text" id="queryBox" placeholder="輸入規格、型號或品牌，例如 215/55 或 韓泰">
+        </div>
+        <div class="count" id="queryCount"></div>
+      </div>
+      <div id="queryResults"></div>
+    </section>
+
+    <!-- 庫存總表 -->
+    <section class="page" id="page-master">
+      <div class="page-head">
+        <div class="toolbar">
+          <input type="text" id="masterBox" placeholder="輸入規格、型號或品牌篩選">
+          <button id="exportFilteredBtn">匯出目前結果(Excel)</button>
+          <button id="exportAllBtn">匯出完整備份(Excel)</button>
+        </div>
+        <div class="toolbar">
+          <span style="font-size:13px;color:var(--muted);">顯示超過</span>
+          <select id="expireYearsSelect">
+            <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+            <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+            <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+          </select>
+          <span style="font-size:13px;color:var(--muted);">年以上之輪胎</span>
+          <button class="primary" id="applyExpireBtn">套用反紅</button>
+          <button id="clearExpireBtn">清除反紅</button>
+        </div>
+        <div class="count" id="masterCount"></div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>品牌</th><th>型號</th><th>規格</th><th>總量</th><th>儲位分布（點擊各儲位可調整生產日期／搬倉）</th><th>成本</th><th>備註</th></tr></thead>
+          <tbody id="masterBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 進銷貨管理 -->
+    <section class="page" id="page-txn">
+      <div class="page-head">
+        <div class="toolbar">
+          <button class="primary" id="newTxnBtn">+ 新增進貨/銷貨</button>
+          <button id="newItemBtn">+ 新增品項</button>
+        </div>
+        <div class="toolbar">
+          <input type="date" id="txnFilterFrom">
+          <span style="font-size:13px;color:var(--muted);">～</span>
+          <input type="date" id="txnFilterTo">
+          <input type="text" id="txnFilterSalesperson" placeholder="篩選業務姓名">
+          <input type="text" id="txnFilterCustomer" placeholder="篩選客戶姓名">
+          <button id="txnFilterClearBtn">清除篩選</button>
+        </div>
+        <div class="count" id="txnCount"></div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>日期</th><th>類型</th><th>品項</th><th>數量</th><th>業務</th><th>客戶</th><th>操作人員</th><th>操作</th></tr></thead>
+          <tbody id="txnBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 訂單管理（管理者：確認/修改/取消員工送出的叫貨） -->
+    <section class="page" id="page-orders">
+      <div class="page-head">
+        <div class="count" id="ordersCount"></div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>下單時間</th><th>業務</th><th>品項</th><th>數量</th><th>客戶</th><th>聯絡方式</th><th>備註</th><th>操作</th></tr></thead>
+          <tbody id="ordersBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 我的訂單（員工：查看自己叫貨的狀態與紀錄） -->
+    <section class="page" id="page-myorders">
+      <div class="page-head">
+        <div class="count" id="myOrdersCount"></div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>下單時間</th><th>品項</th><th>數量</th><th>客戶</th><th>狀態</th></tr></thead>
+          <tbody id="myOrdersBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 儲位管理 -->
+    <section class="page" id="page-loc">
+      <div class="page-head">
+        <div class="toolbar">
+          <input type="text" id="newLocInput" placeholder="新儲位代碼，例如 A左">
+          <button class="primary" id="addLocBtn">新增儲位</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>儲位代碼</th><th>操作</th></tr></thead>
+          <tbody id="locBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 資料匯入（一次性工具） -->
+    <section class="page" id="page-import">
+      <div class="toolbar">
+        <button id="clearDataBtn">清除所有品項與儲位資料</button>
+      </div>
+      <div class="toolbar">
+        <input type="file" id="importFile" accept=".xlsx">
+        <button class="primary" id="importBtn">開始匯入</button>
+      </div>
+      <div class="count" id="importStatus">這個工具可重複使用，會自動判斷你選的檔案類型：<br>1. 上傳「庫存資料整併結果.xlsx」→ 匯入舊資料整併結果。<br>2. 上傳「庫存總表」頁面匯出的「完整備份_日期.xlsx」→ 完整還原成備份當時的品項、儲位、成本、進出貨紀錄（會先清除目前資料，此動作無法復原，會先跳出確認）。</div>
+    </section>
+
+    <!-- 使用者管理 -->
+    <section class="page" id="page-users">
+      <div class="page-head">
+        <div class="toolbar">
+          <button class="primary" id="newUserBtn">+ 新增使用者</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>姓名</th><th>帳號</th><th>角色</th><th>狀態</th><th>密碼備註</th><th>操作</th></tr></thead>
+          <tbody id="userBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 通用 modal 容器 -->
+<div id="modalOverlay" class="overlay hidden">
+  <div class="sheet" id="modalSheet"></div>
+</div>
+
+<!-- Firebase SDK (compat CDN 版本，不需要 npm/打包工具) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<!-- SheetJS：用來匯出 Excel，免費、純前端 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

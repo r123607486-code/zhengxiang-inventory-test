@@ -1,0 +1,109 @@
+:root{
+  --red:#d0262b; --red-dark:#a31e22; --bg:#f3f4f7; --card:#ffffff;
+  --text:#20232b; --muted:#6b7280; --border:#e2e5ec; --green:#1d9e75; --amber:#c07a12;
+}
+*{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--text);overscroll-behavior-y:none;}
+.hidden{display:none !important;}
+svg.icon{width:20px;height:20px;flex-shrink:0;}
+
+/* ---------- 啟動/登入畫面 ---------- */
+#splash{min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:24px;background:linear-gradient(180deg,#fff 0%,#f3f4f7 100%);}
+.login-box{background:var(--card);padding:36px 30px;border-radius:16px;box-shadow:0 8px 30px rgba(20,20,20,.10);width:100%;max-width:340px;text-align:center;}
+.login-box img.logo{max-width:220px;margin:0 auto 22px;display:block;}
+.login-box h1{font-size:15px;margin:0 0 20px;color:var(--red-dark);font-weight:700;}
+.login-box input{width:100%;padding:12px 14px;font-size:16px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;}
+.login-box button{width:100%;padding:12px;font-size:15px;background:var(--red);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;}
+.login-box button:active{background:var(--red-dark);}
+.login-err{color:#b3261e;font-size:13px;margin-top:6px;min-height:18px;}
+
+/* ---------- 主畫面 ---------- */
+:root{ --header-h:64px; --nav-h:48px; }
+header.topbar{background:#fff;padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;position:sticky;top:0;z-index:30;box-shadow:0 2px 8px rgba(20,20,20,.06);}
+header.topbar img.logo{height:40px;flex-shrink:0;}
+header.topbar .title{font-weight:700;font-size:17px;color:var(--red-dark);flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+header.topbar .actions{display:flex;align-items:center;gap:8px;flex-shrink:0;margin-left:auto;flex-wrap:wrap;justify-content:flex-end;}
+header.topbar .who{font-size:12.5px;color:var(--muted);white-space:nowrap;}
+header.topbar button.logout{border:1px solid var(--border);background:#fff;border-radius:8px;padding:7px 12px;font-size:12.5px;cursor:pointer;white-space:nowrap;}
+@media (max-width:520px){
+  header.topbar .title{font-size:15px;}
+  header.topbar .actions{flex-basis:100%;order:3;justify-content:space-between;}
+}
+
+nav.tabs{display:flex;gap:8px;overflow-x:auto;padding:10px;background:#fff;border-bottom:1px solid var(--border);position:sticky;top:var(--header-h);z-index:25;}
+nav.tabs button{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);background:#fff;border-radius:20px;padding:9px 16px;font-size:13.5px;line-height:1;cursor:pointer;color:var(--text);white-space:nowrap;}
+nav.tabs button.active{background:var(--red);border-color:var(--red);color:#fff;font-weight:600;}
+nav.tabs button.active svg.icon{stroke:#fff;}
+
+main{padding:14px;max-width:960px;margin:0 auto;}
+.page{display:none;}
+.page.active{display:block;}
+
+/* 每一頁最上面的搜尋/篩選/統計區塊：固定在頂部，只有下面的清單/表格會捲動（跟S-TEAM那個查詢頁一樣的效果） */
+.page-head{position:sticky;top:calc(var(--header-h) + var(--nav-h));z-index:20;background:var(--bg);padding-top:2px;margin:0 -14px;padding-left:14px;padding-right:14px;}
+.page-head .toolbar:first-child{margin-top:0;}
+
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;}
+.toolbar input[type=text]{flex:1;min-width:160px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:16px;background:#fff;}
+.toolbar input[type=date]{padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:16px;background:#fff;}
+.toolbar button{border:1px solid var(--border);background:#fff;border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;}
+.toolbar button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600;}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
+.chip{padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;font-size:12.5px;cursor:pointer;}
+.chip.selected{background:var(--red);border-color:var(--red);color:#fff;font-weight:600;}
+
+.count{font-size:12.5px;color:var(--muted);margin-bottom:8px;}
+
+/* 卡片(手機用/庫存查詢) */
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;}
+.card .code-row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+.card .code{font-weight:700;font-size:14.5px;}
+.card .sub{font-size:12.5px;color:var(--muted);margin:4px 0;}
+.card .qty{font-size:16px;font-weight:700;color:var(--red-dark);}
+.card .tag-expire{display:inline-block;background:#fde8e8;color:#a31e22;font-size:11px;padding:2px 8px;border-radius:6px;margin-left:6px;}
+.order-btn{display:inline-flex;align-items:center;gap:4px;background:var(--red);color:#fff;border:none;border-radius:20px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0;}
+.order-btn svg{width:14px;height:14px;stroke:#fff;}
+.badge-dot{background:#e11d2e;color:#fff;border-radius:50%;min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;margin-left:4px;padding:0 4px;line-height:1;}
+
+/* 表格(庫存總表用) */
+.table-wrap{overflow-x:auto;background:#fff;border:1px solid var(--border);border-radius:12px;}
+table.grid{width:100%;border-collapse:collapse;font-size:13px;min-width:720px;}
+table.grid th{background:#f7f2ef;text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);position:sticky;top:0;white-space:nowrap;}
+table.grid td{padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;}
+table.grid tr.expire{background:#fdecec;}
+table.grid tr.expire td{color:#a31e22;}
+table.grid td.cost-cell{cursor:pointer;text-decoration:underline dotted;}
+table.grid td.loc-detail-cell{white-space:normal;}
+table.grid .loc-line{cursor:pointer;text-decoration:underline dotted;padding:2px 0;}
+table.grid .loc-line:hover{color:var(--red-dark);}
+table.grid .loc-line.loc-expired{color:#a31e22;font-weight:700;}
+.empty-inline{color:var(--muted);font-size:12px;}
+
+.empty{text-align:center;color:var(--muted);padding:30px 10px;font-size:13.5px;}
+
+/* modal */
+.overlay{position:fixed;inset:0;background:rgba(20,20,20,.45);z-index:30;display:flex;align-items:flex-end;justify-content:center;overscroll-behavior:contain;}
+.sheet{background:#fff;width:100%;max-width:640px;max-height:86vh;max-height:86svh;overflow-y:auto;overscroll-behavior:contain;border-radius:16px 16px 0 0;padding:18px;}
+@media (min-width:640px){.sheet{border-radius:16px;margin-bottom:40px;}}
+.sheet-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+.sheet-head h2{font-size:15px;margin:0;}
+.sheet-close{border:none;background:var(--bg);width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer;color:var(--muted);}
+
+.form-row{margin-bottom:10px;}
+.form-row label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;}
+.form-row input, .form-row select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:8px;font-size:16px;}
+.form-actions{display:flex;gap:8px;margin-top:14px;}
+.form-actions button{flex:1;padding:11px;border-radius:8px;border:1px solid var(--border);background:#fff;font-size:14px;cursor:pointer;}
+.form-actions button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600;}
+
+.autocomplete-list{border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto;margin-top:-6px;margin-bottom:10px;background:#fff;}
+.autocomplete-list div{padding:8px 10px;font-size:13.5px;cursor:pointer;border-bottom:1px solid var(--border);}
+.autocomplete-list div:hover{background:var(--bg);}
+
+.badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;}
+.badge.on{background:#e6f5ef;color:var(--green);}
+.badge.off{background:#f1f1f1;color:var(--muted);}
+
+.banner{background:#fff6e6;border:1px solid #f0d9a8;color:var(--amber);padding:10px 14px;border-radius:10px;margin-bottom:12px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+.banner button{border:1px solid var(--amber);background:#fff;color:var(--amber);border-radius:8px;padding:6px 12px;font-size:12.5px;cursor:pointer;}
