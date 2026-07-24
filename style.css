@@ -18,6 +18,18 @@ svg.icon{width:20px;height:20px;flex-shrink:0;}
 .login-box button:active{background:var(--red-dark);}
 .login-err{color:#b3261e;font-size:13px;margin-top:6px;min-height:18px;}
 
+/* ---------- 登入後的品項分類選擇畫面 ---------- */
+#categoryScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:linear-gradient(180deg,#fff 0%,#f3f4f7 100%);}
+.category-wrap{width:100%;max-width:520px;text-align:center;}
+.category-wrap h1{font-size:16px;color:var(--red-dark);margin:0 0 20px;font-weight:700;}
+.category-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media (max-width:480px){.category-grid{grid-template-columns:1fr;}}
+.category-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:26px 14px;display:flex;flex-direction:column;align-items:center;gap:12px;cursor:pointer;box-shadow:0 4px 16px rgba(20,20,20,.06);}
+.category-card:active{background:var(--bg);}
+.category-icon{width:48px;height:48px;display:flex;align-items:center;justify-content:center;color:var(--red);}
+.category-icon svg{width:48px;height:48px;}
+.category-label{font-size:14px;font-weight:700;color:var(--text);}
+
 /* ---------- 主畫面 ---------- */
 :root{ --header-h:64px; --nav-h:48px; }
 header.topbar{background:#fff;padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;position:sticky;top:0;z-index:30;box-shadow:0 2px 8px rgba(20,20,20,.06);}
@@ -57,6 +69,13 @@ main{padding:14px;max-width:960px;margin:0 auto;}
 
 /* 卡片(手機用/庫存查詢) */
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:8px;}
+.card.card-nostock{opacity:.55;}
+.card.card-nostock .qty{color:var(--muted);}
+.card.card-pending{background:#fff4de;border-color:#f0c674;}
+.pending-tag{display:inline-block;background:#c07a12;color:#fff;font-size:10.5px;padding:1px 7px;border-radius:6px;margin-left:6px;vertical-align:middle;}
+table.grid tr.row-pending{background:#fff4de;}
+table.grid tr.row-pending td{color:#8a5a10;}
+table.grid .loc-line.loc-pending{font-weight:700;color:#c07a12;}
 .card .code-row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
 .card .code{font-weight:700;font-size:14.5px;}
 .card .sub{font-size:12.5px;color:var(--muted);margin:4px 0;}
@@ -73,7 +92,7 @@ table.grid th{background:#f7f2ef;text-align:left;padding:8px 10px;border-bottom:
 table.grid td{padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;}
 table.grid tr.expire{background:#fdecec;}
 table.grid tr.expire td{color:#a31e22;}
-table.grid td.cost-cell{cursor:pointer;text-decoration:underline dotted;}
+table.grid td.editable-cell{cursor:pointer;text-decoration:underline dotted;}
 table.grid td.loc-detail-cell{white-space:normal;}
 table.grid .loc-line{cursor:pointer;text-decoration:underline dotted;padding:2px 0;}
 table.grid .loc-line:hover{color:var(--red-dark);}
