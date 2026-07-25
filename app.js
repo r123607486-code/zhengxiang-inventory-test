@@ -237,7 +237,7 @@ const KYB_TAB_DEFS = [
   {id:"kyb-txn",      label:"進銷貨管理", icon:ICONS.txn,   roles:["admin"]},
   {id:"kyb-orders",   label:"訂單管理", icon:ICONS.orders,  roles:["admin"]},
   {id:"kyb-loc",      label:"儲位管理", icon:ICONS.loc,     roles:["admin"]},
-  {id:"import",       label:"資料匯入", icon:ICONS.txn,     roles:["admin"]},
+  {id:"kyb-import",   label:"資料匯入", icon:ICONS.txn,     roles:["admin"]},
   {id:"users",        label:"使用者管理", icon:ICONS.users, roles:["admin"]},
 ];
 function currentTabDefs(){ return currentCategory === "kyb" ? KYB_TAB_DEFS : TIRE_TAB_DEFS; }
@@ -1377,7 +1377,6 @@ document.getElementById("importBtn").addEventListener("click", async ()=>{
   }
 
   if(await tryImportSailunSheet(wb, statusEl)) return;
-  if(await tryImportKybSheet(wb, statusEl)) return;
 
   const knownLocationCodes = new Set(locationsCache.map(l=>l.code));
   const newItems = [];
@@ -1706,6 +1705,38 @@ async function tryImportKybSheet(wb, statusEl){
   statusEl.textContent = `KYB報價單匯入完成！新增 ${created} 筆車型、更新 ${updated} 筆價格${skippedNoteCount?`（已跳過看起來像備註文字的 ${skippedNoteCount} 列）`:""}。`;
   return true;
 }
+
+// ============================================================
+// KYB 專用的資料匯入／清除（獨立於輪胎的資料匯入頁面，避免誤刪對方的資料）
+// ============================================================
+document.getElementById("kybClearDataBtn").addEventListener("click", async ()=>{
+  if(!confirm("確定要清除所有「KYB車型」與「KYB儲位」資料嗎？（不會動到輪胎資料，也不會動到KYB的進出貨紀錄）這通常是為了重新匯入正確的資料才做，確定要繼續嗎？")) return;
+  const statusEl = document.getElementById("kybImportStatus");
+  statusEl.textContent = "清除中...";
+  const itemsSnap = await db.collection("kybItems").get();
+  const locSnap = await db.collection("kybLocations").get();
+  const allDocs = [...itemsSnap.docs, ...locSnap.docs];
+  let done = 0;
+  while(done < allDocs.length){
+    const batch = db.batch();
+    allDocs.slice(done, done+400).forEach(d=>batch.delete(d.ref));
+    await batch.commit();
+    done += 400;
+  }
+  statusEl.textContent = `已清除 ${itemsSnap.size} 筆KYB車型與 ${locSnap.size} 筆儲位資料，可以重新選檔匯入了。`;
+});
+
+document.getElementById("kybImportBtn").addEventListener("click", async ()=>{
+  const fileInput = document.getElementById("kybImportFile");
+  const statusEl = document.getElementById("kybImportStatus");
+  if(!fileInput.files.length){ alert("請先選擇檔案"); return; }
+  statusEl.textContent = "讀取檔案中...";
+  const file = fileInput.files[0];
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, {type:"array"});
+  if(await tryImportKybSheet(wb, statusEl)) return;
+  statusEl.textContent = "找不到可匯入的KYB報價單格式，請確認上傳的檔案含「車型」「訂價」「牌價」欄位。";
+});
 
 // ============================================================
 // KYB 避震器模組（獨立品項：無生產批次／效期，但有完整叫貨/訂單管理/進銷貨流程）
