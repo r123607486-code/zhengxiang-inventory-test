@@ -233,19 +233,19 @@ async function tryImportSailunSheet(wb, statusEl){
   });
 
   const rowsToApply = Array.from(merged.values());
-  statusEl.textContent = `偵測到賣輪總表，共 ${rowsToApply.length} 筆規格（已跳過備註含「下市」的 ${skippedCount} 筆），匯入中...`;
+  statusEl.textContent = `偵測到賽輪總表，共 ${rowsToApply.length} 筆規格（已跳過備註含「下市」的 ${skippedCount} 筆），匯入中...`;
 
   let created = 0, updated = 0;
   let batch = db.batch();
   let opCount = 0;
   for(const r of rowsToApply){
-    const existing = itemsCache.find(it=> norm(it.brand)===norm("賣輪Sailun") && norm(it.spec)===norm(r.spec) && norm(it.model)===norm(r.model));
+    const existing = itemsCache.find(it=> norm(it.brand)===norm("賽輪Sailun") && norm(it.spec)===norm(r.spec) && norm(it.model)===norm(r.model));
     if(existing){
       batch.update(db.collection("items").doc(existing.id), { twenty: r.twenty, sellPrice: r.sellPrice });
       updated++;
     } else {
       const ref = db.collection("items").doc();
-      batch.set(ref, { brand:"賣輪Sailun", model:r.model, spec:r.spec, remark:"", locations:{}, twenty:r.twenty, sellPrice:r.sellPrice });
+      batch.set(ref, { brand:"賽輪Sailun", model:r.model, spec:r.spec, remark:"", locations:{}, twenty:r.twenty, sellPrice:r.sellPrice });
       created++;
     }
     opCount++;
@@ -253,7 +253,7 @@ async function tryImportSailunSheet(wb, statusEl){
   }
   if(opCount > 0) await batch.commit();
 
-  statusEl.textContent = `賣輪總表匯入完成！新增 ${created} 筆、更新20%／售價 ${updated} 筆（跳過備註含「下市」的 ${skippedCount} 筆）。`;
+  statusEl.textContent = `賽輪總表匯入完成！新增 ${created} 筆、更新20%／售價 ${updated} 筆（跳過備註含「下市」的 ${skippedCount} 筆）。`;
   return true;
 }
 
