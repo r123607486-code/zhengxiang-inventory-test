@@ -47,8 +47,9 @@ function renderMaster(){
       <td class="twenty-cell${currentUser.role==='admin'?' editable-cell':''}" data-id="${it.id}">${it.twenty!=null?it.twenty:"未填"}</td>
       <td class="price-cell${currentUser.role==='admin'?' editable-cell':''}" data-id="${it.id}">${it.sellPrice!=null?it.sellPrice:"未填"}</td>
       <td>${escapeHtml(it.remark||"")}</td>
+      <td>${currentUser.role==='admin' ? `<button data-del="${it.id}" data-label="${escapeHtml(it.brand)} ${escapeHtml(it.spec)}">刪除</button>` : ""}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="8" class="empty">尚無資料</td></tr>`;
+  }).join("") || `<tr><td colspan="9" class="empty">尚無資料</td></tr>`;
 
   body.querySelectorAll(".loc-line").forEach(el=>{
     el.addEventListener("click", ()=> openLocationModal(el.dataset.id, el.dataset.code, Number(el.dataset.idx)));
@@ -60,9 +61,26 @@ function renderMaster(){
     body.querySelectorAll(".price-cell").forEach(td=>{
       td.addEventListener("click", ()=> editSellPrice(td.dataset.id));
     });
+    body.querySelectorAll("[data-del]").forEach(b=>{
+      b.addEventListener("click", ()=> deleteItem(b.dataset.del, b.dataset.label));
+    });
   }
 
   window._masterFilteredList = list;
+}
+
+function deleteItem(itemId, label){
+  if(currentUser.role !== "admin") return;
+  const item = itemsCache.find(i=>i.id===itemId);
+  if(!item) return;
+  const qty = totalQty(item);
+  if(qty > 0){
+    alert(`「${label}」目前還有庫存（共 ${qty}），請先到儲位管理把庫存搬空或歸零，再刪除這個品項。`);
+    return;
+  }
+  if(!confirm(`確定要刪除品項「${label}」嗎？此動作無法復原。`)) return;
+  db.collection("items").doc(itemId).delete()
+    .catch(e=>alert("刪除失敗："+e.message));
 }
 
 function openLocationModal(itemId, code, idx){
