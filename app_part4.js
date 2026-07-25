@@ -16,7 +16,7 @@ document.getElementById("changePwBtn").addEventListener("click", async ()=>{
   if(oldPw === null) return;
   const newPw = prompt("請輸入新密碼（至少6碼）：");
   if(newPw === null) return;
-  if(!newPw || newPw.length < 6){ alert("新密碼至少要16碼"); return; }
+  if(!newPw || newPw.length < 6){ alert("新密碼至少要6碼"); return; }
   try{
     const email = currentUser.username + "@" + INTERNAL_EMAIL_DOMAIN;
     const cred = firebase.auth.EmailAuthProvider.credential(email, oldPw);
