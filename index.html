@@ -320,13 +320,20 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script src="firebase-config.js"></script>
-<!-- app.js 因為太大，分成 app.js + app_part2/app_part2b/app_part3~6.js 依序載入（等同一份完整程式碼，只是拆檔避免單次上傳過大） -->
-<script src="app.js"></script>
-<script src="app_part2.js"></script>
-<script src="app_part2b.js"></script>
-<script src="app_part3.js"></script>
-<script src="app_part4.js"></script>
-<script src="app_part5.js"></script>
-<script src="app_part6.js"></script>
+<!-- app.js 實在太大，之前拆成多個 app_part*.js 檔案，但別的 <script src> 各自狔立解析，不能跨檔案接續中斷的函式，所以改用 fetch+eval 先拼成完整的一段程式碼再執行。 -->
+<script>
+(function(){
+  var files = ["app.js","app_part2.js","app_part2b.js","app_part3.js","app_part4.js","app_part5.js","app_part6.js"];
+  Promise.all(files.map(function(f){ return fetch(f).then(function(r){ return r.text(); }); }))
+    .then(function(parts){
+      var code = parts.join("\n");
+      (0, eval)(code);
+    })
+    .catch(function(err){
+      document.body.innerHTML = '<div style="padding:40px;font-family:sans-serif;color:#a31e22;">程式碼載入失敗，請刷新重試。錯誤：' + (err && err.message) + '</div>';
+      console.error(err);
+    });
+})();
+</script>
 </body>
 </html>
