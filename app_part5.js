@@ -1,4 +1,3 @@
-  const locSnap = await db.collection("kybLocations").get();
   const allDocs = [...itemsSnap.docs, ...locSnap.docs];
   let done = 0;
   while(done < allDocs.length){
