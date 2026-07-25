@@ -178,7 +178,7 @@
         <input type="file" id="importFile" accept=".xlsx">
         <button class="primary" id="importBtn">開始匯入</button>
       </div>
-      <div class="count" id="importStatus">這個工具可重複使用，會自動判斷你選的檔案類型：<br>1. 上傳「庫存資料整併結果.xlsx」→ 匯入舊資料整併結果。<br>2. 上傳「庫存總表」頁面匯出的「完整備份_日期.xlsx」→ 完整還原成備份當時的品項、儲位、20%／售價、進出貨紀錄（會先清除目前資料，此動作無法復原，會先跳出確認）。<br>3. 上傳廠商提供的賽輪總表（含「品名規格」「花紋」欄位）→ 自動新增新規格、更新已存在規格的20%／售價（備註含「下市」的品項會跳過，不會被匯入或更新）。<br>4. 上傳KYB報價單（含「車型」「訂價」「牌價」欄位）→ 自動建立/更新KYB車型清單（庫存與儲位請自行在「KYB庫存總表」輸入）。</div>
+      <div class="count" id="importStatus">這個工具可重複使用（僅適用於輪胎資料），會自動判斷你選的檔案類型：<br>1. 上傳「庫存資料整併結果.xlsx」→ 匯入舊資料整併結果。<br>2. 上傳「庫存總表」頁面匯出的「完整備份_日期.xlsx」→ 完整還原成備份當時的品項、儲位、20%／售價、進出貨紀錄（會先清除目前資料，此動作無法復原，會先跳出確認）。<br>3. 上傳廠商提供的賽輪總表（含「品名規格」「花紋」欄位）→ 自動新增新規格、更新已存在規格的20%／售價（備註含「下市」的品項會跳過，不會被匯入或更新）。<br>（KYB相關的匯入與清除，請切換到KYB分類後在「資料匯入」頁面操作，避免誤動到輪胎資料。）</div>
     </section>
 
     <!-- 使用者管理 -->
@@ -291,6 +291,18 @@
           <tbody id="kybLocBody"></tbody>
         </table>
       </div>
+    </section>
+
+    <!-- KYB 資料匯入（獨立於輪胎的資料匯入，避免誤刪對方的資料） -->
+    <section class="page" id="page-kyb-import">
+      <div class="toolbar">
+        <button id="kybClearDataBtn">清除所有KYB車型與儲位資料</button>
+      </div>
+      <div class="toolbar">
+        <input type="file" id="kybImportFile" accept=".xlsx">
+        <button class="primary" id="kybImportBtn">開始匯入</button>
+      </div>
+      <div class="count" id="kybImportStatus">這個工具僅適用於KYB資料，不會動到輪胎的品項／儲位：<br>上傳廠商提供的KYB報價單（含「車型」「訂價」「牌價」欄位）→ 自動建立/更新KYB車型清單（庫存與儲位請自行在「KYB庫存總表」輸入）。</div>
     </section>
   </main>
 </div>
