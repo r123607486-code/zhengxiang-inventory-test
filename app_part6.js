@@ -1,31 +1,85 @@
 
   await itemRef.update({locations: allLocs});
   await db.collection("kybTransactions").add({
-    itemId, type, qty, loc, date: todayStr(), operator: currentUser.name, editLog: []
+    itemId, type, qty, loc, date: todayStr(), operator: currentUser.name, editLog: [],
+    createdAt: new Date().toISOString()
   });
   closeModal();
 }
 
-async function editKybTxn(txnId){
+// 編輯進銷貨紀錄：日期、數量、儲位、業務、客戶姓名都可以改。
+// 儲位一定要從現有儲位清單選（不能自己打字）。
+// 不管改哪個欄位，都會先把「舊紀錄」對庫存的影響完全還原，再套用「新紀錄」的影響，確保庫存數量一定會跟著正確增減。
+function openEditKybTxnModal(txnId){
   const t = kybTxnCache.find(x=>x.id===txnId);
   if(!t) return;
-  const newQty = Number(prompt(`目前數量為 ${t.qty}，請輸入修正後的數量：`, t.qty));
-  if(!newQty || newQty<=0) return;
-  const diff = newQty - t.qty;
+  const item = kybItemsCache.find(i=>i.id===t.itemId);
+  const itemLabel = item ? kybItemLabel(item) : "(車型已刪除，仍可編輯其他資訊，但無法改儲位)";
+  const html = `
+    <div class="sheet-head"><h2>編輯進銷貨紀錄</h2><button class="sheet-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row"><label>車型</label><input type="text" value="${escapeHtml(itemLabel)}" disabled></div>
+    <div class="form-row"><label>類型</label><input type="text" value="${t.type==='in'?'進貨':'銷貨'}" disabled></div>
+    <div class="form-row"><label>日期</label><input type="date" id="editKybTxnDate" value="${escapeHtml(t.date||todayStr())}"></div>
+    <div class="form-row"><label>數量</label><input type="number" id="editKybTxnQty" min="1" value="${t.qty}"></div>
+    <div class="form-row"><label>儲位</label>
+      <select id="editKybTxnLoc">${kybLocationsCache.map(l=>`<option value="${escapeHtml(l.code)}" ${l.code===t.loc?'selected':''}>${escapeHtml(l.code)}</option>`).join("")}</select>
+    </div>
+    <div class="form-row"><label>業務</label><input type="text" id="editKybTxnSalesperson" value="${escapeHtml(t.salesperson||"")}"></div>
+    <div class="form-row"><label>客戶姓名</label><input type="text" id="editKybTxnCustomerName" value="${escapeHtml(t.customerName||"")}"></div>
+    <div class="form-actions">
+      <button onclick="closeModal()">取消</button>
+      <button class="primary" id="editKybTxnSaveBtn">儲存</button>
+    </div>`;
+  openModal(html);
+
+  document.getElementById("editKybTxnSaveBtn").addEventListener("click", async ()=>{
+    const newDate = document.getElementById("editKybTxnDate").value || todayStr();
+    const newQty = Number(document.getElementById("editKybTxnQty").value);
+    const newLoc = document.getElementById("editKybTxnLoc").value;
+    const newSalesperson = document.getElementById("editKybTxnSalesperson").value.trim();
+    const newCustomerName = document.getElementById("editKybTxnCustomerName").value.trim();
+    if(!newQty || newQty<=0){ alert("請輸入正確的數量"); return; }
+    if(!newLoc){ alert("請選擇儲位"); return; }
+    try{
+      await saveEditKybTxn(t, { date:newDate, qty:newQty, loc:newLoc, salesperson:newSalesperson, customerName:newCustomerName });
+      closeModal();
+    }catch(e){
+      alert("儲存失敗："+e.message);
+    }
+  });
+}
+
+async function saveEditKybTxn(t, next){
   const itemRef = db.collection("kybItems").doc(t.itemId);
   const itemSnap = await itemRef.get();
   if(itemSnap.exists){
     const item = itemSnap.data();
     const allLocs = {...(item.locations||{})};
-    const sign = t.type === "in" ? 1 : -1;
-    const next = kybLocQty(allLocs[t.loc]) + diff*sign;
-    if(next <= 0) delete allLocs[t.loc]; else allLocs[t.loc] = next;
-    await itemRef.update({locations: allLocs});
+
+    // 1) 先把「舊紀錄」對庫存的影響完全還原（進貨要扣掉、銷貨要加回去）
+    const oldSign = t.type === "in" ? -1 : 1;
+    const revertedOldQty = kybLocQty(allLocs[t.loc]) + t.qty*oldSign;
+    if(revertedOldQty <= 0) delete allLocs[t.loc]; else allLocs[t.loc] = revertedOldQty;
+
+    // 2) 在還原後的庫存基礎上，套用「新紀錄」的內容
+    const newSign = t.type === "in" ? 1 : -1;
+    const curAtNewLoc = kybLocQty(allLocs[next.loc]);
+    const resultQty = curAtNewLoc + next.qty*newSign;
+    if(t.type === "out" && resultQty < 0){
+      throw new Error(`這個儲位目前只有 ${curAtNewLoc}，不夠改成銷貨 ${next.qty}`);
+    }
+    if(resultQty <= 0) delete allLocs[next.loc]; else allLocs[next.loc] = resultQty;
+
+    await itemRef.update({ locations: allLocs });
   }
-  await db.collection("kybTransactions").doc(txnId).update({
-    qty: newQty,
+
+  await db.collection("kybTransactions").doc(t.id).update({
+    date: next.date, qty: next.qty, loc: next.loc,
+    salesperson: next.salesperson, customerName: next.customerName,
     editLog: firebase.firestore.FieldValue.arrayUnion({
-      before: t.qty, after: newQty, time: new Date().toISOString(), by: currentUser.name
+      before: { date:t.date||null, qty:t.qty, loc:t.loc, salesperson:t.salesperson||"", customerName:t.customerName||"" },
+      after: { date:next.date, qty:next.qty, loc:next.loc, salesperson:next.salesperson, customerName:next.customerName },
+      time: new Date().toISOString(), by: currentUser.name
     })
   });
 }
@@ -48,12 +102,18 @@ async function deleteKybTxn(txnId){
 }
 
 function openNewKybItemModal(){
+  const bucketOptions = ["白桶","藍桶","深藍桶"];
   const html = `
     <div class="sheet-head"><h2>新增車型</h2><button class="sheet-close" onclick="closeModal()">✕</button></div>
     <div class="form-row"><label>車型</label><input type="text" id="newKybModel" placeholder="例如 Altis '19~"></div>
-    <div class="form-row"><label>訂價</label><input type="number" id="newKybListPrice"></div>
-    <div class="form-row"><label>牌價</label><input type="number" id="newKybCatalogPrice"></div>
-    <div class="form-row"><label>保修廠</label><input type="number" id="newKybWarrantyPrice"></div>
+    <div class="form-row"><label>廠牌</label><input type="text" id="newKybMake" placeholder="例如 TOYOTA"></div>
+    <div class="form-row"><label>避震款式</label>
+      <select id="newKybBucket">${bucketOptions.map(b=>`<option value="${b}">${b}</option>`).join("")}</select>
+    </div>
+    <div class="form-row"><label>年份代碼（選填）</label><input type="text" id="newKybYearCode" placeholder="例如 193-"></div>
+    <div class="form-row"><label>料號（選填）</label><input type="text" id="newKybPartNo" placeholder="例如 NSTC5666L/NSTC5666R/NSFC2222"></div>
+    <div class="form-row"><label>一線消費者售價</label><input type="number" id="newKybCatalogPrice"></div>
+    <div class="form-row"><label>保修廠價</label><input type="number" id="newKybWarrantyPrice"></div>
     <div class="form-row"><label>備註</label><input type="text" id="newKybRemark"></div>
     <div class="form-actions">
       <button onclick="closeModal()">取消</button>
@@ -65,8 +125,13 @@ function openNewKybItemModal(){
     if(!carModel){ alert("請輸入車型"); return; }
     const toNum = (id)=>{ const v = document.getElementById(id).value; return v===""?null:Number(v); };
     await db.collection("kybItems").add({
-      carModel, brand:"KYB", remark: document.getElementById("newKybRemark").value.trim(),
-      locations:{}, listPrice: toNum("newKybListPrice"), catalogPrice: toNum("newKybCatalogPrice"), warrantyPrice: toNum("newKybWarrantyPrice")
+      carModel, brand:"KYB",
+      carMake: document.getElementById("newKybMake").value.trim(),
+      bucketType: document.getElementById("newKybBucket").value,
+      yearCode: document.getElementById("newKybYearCode").value.trim(),
+      partNo: document.getElementById("newKybPartNo").value.trim(),
+      remark: document.getElementById("newKybRemark").value.trim(),
+      locations:{}, catalogPrice: toNum("newKybCatalogPrice"), warrantyPrice: toNum("newKybWarrantyPrice")
     });
     closeModal();
   });
@@ -167,7 +232,8 @@ async function submitKybOrderTxn(order, loc){
     date: todayStr(), operator: currentUser.name,
     salesperson: order.requestedByName || "", customerName: order.customerName || "",
     customerContact: order.customerContact || "", customerNote: order.customerNote || "",
-    orderId: order.id, editLog: []
+    orderId: order.id, editLog: [],
+    createdAt: new Date().toISOString()
   });
 }
 
@@ -178,7 +244,7 @@ function openEditKybOrderModal(orderId){
   const html = `
     <div class="sheet-head"><h2>修改訂單</h2><button class="sheet-close" onclick="closeModal()">✕</button></div>
     <div class="form-row">
-      <label>搜尋車型（要換車型才需要，不換不用理它）</label>
+      <label>搜尋車型（要換車型才需要，不換不用理它；找不到請確認避震款式，例如CRV可能同時有白桶／藍桶）</label>
       <input type="text" id="editKybOrderItemSearch" placeholder="例如 Altis">
       <div class="autocomplete-list hidden" id="editKybOrderItemList"></div>
     </div>
@@ -212,12 +278,12 @@ function openEditKybOrderModal(orderId){
     const listEl = document.getElementById("editKybOrderItemList");
     if(!q){ listEl.classList.add("hidden"); return; }
     const matches = kybItemsCache.filter(it=> norm(it.carModel).includes(q)).slice(0,15);
-    listEl.innerHTML = matches.map(it=>`<div data-id="${it.id}">${escapeHtml(it.carModel)}</div>`).join("");
+    listEl.innerHTML = matches.map(it=>`<div data-id="${it.id}">${escapeHtml(kybItemLabel(it))}</div>`).join("");
     listEl.classList.toggle("hidden", matches.length===0);
     listEl.querySelectorAll("div").forEach(d=>d.addEventListener("click", ()=>{
       selectedItemId = d.dataset.id;
       const it = kybItemsCache.find(i=>i.id===selectedItemId);
-      document.getElementById("editKybOrderItemLabel").value = it.carModel;
+      document.getElementById("editKybOrderItemLabel").value = kybItemLabel(it);
       listEl.classList.add("hidden");
       searchInput.value = "";
       refreshEditLocOptions();
