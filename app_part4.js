@@ -16,7 +16,7 @@ document.getElementById("changePwBtn").addEventListener("click", async ()=>{
   if(oldPw === null) return;
   const newPw = prompt("請輸入新密碼（至少6碼）：");
   if(newPw === null) return;
-  if(!newPw || newPw.length < 6){ alert("新密碼至少要6碼"); return; }
+  if(!newPw || newPw.length < 6){ alert("新密碼至少覆30碼"); return; }
   try{
     const email = currentUser.username + "@" + INTERNAL_EMAIL_DOMAIN;
     const cred = firebase.auth.EmailAuthProvider.credential(email, oldPw);
@@ -108,7 +108,7 @@ document.getElementById("importBtn").addEventListener("click", async ()=>{
       const locs = {};
       if(zongQty > 0){ locs[zongCode] = {qty:zongQty, productionDate:yearRaw}; knownLocationCodes.add(zongCode); }
       if(pingQty > 0){ locs["屏東"] = {qty:pingQty, productionDate:yearRaw}; knownLocationCodes.add("屏東"); }
-      const costVal = r["成本(已套1.25)"];
+      const costVal = r["成本(已奴1.25)"];
       newItems.push({
         brand: r["品牌"] || "", model: r["型號"] || "", spec: r["規格"] || "",
         locations: locs, remark: r["備註"] || "",
@@ -351,12 +351,20 @@ async function restoreFullBackup(wb, statusEl){
       kybItemRows.slice(count, count+400).forEach(r=>{
         const id = (r["id"] || "").toString().trim();
         if(!id) return;
+        // 相容舊版備份（沒有廠牌／避震款式／年份代碼／料號／一線消費者售價這幾欄）：讀不到就留空，不會報錯
         batch.set(db.collection("kybItems").doc(id), {
           carModel: r["車型"] || "", brand: "KYB",
+          carMake: r["廠牌"] || "",
+          bucketType: r["避震款式"] || "",
+          yearCode: r["年份代碼"] || "",
+          partNo: r["料號"] || "",
           locations: parseKybLocSummaryText(r["儲位分布"]),
-          listPrice: (r["訂價"] === undefined || r["訂價"] === null || r["訂價"] === "") ? null : Number(r["訂價"]),
-          catalogPrice: (r["牌價"] === undefined || r["牌價"] === null || r["牌價"] === "") ? null : Number(r["牌價"]),
-          warrantyPrice: (r["保修廠"] === undefined || r["保修廠"] === null || r["保修廠"] === "") ? null : Number(r["保修廠"]),
+          catalogPrice: (r["一線消費者售價"] === undefined || r["一線消費者售價"] === null || r["一線消費者售價"] === "")
+            ? ((r["牌價"] === undefined || r["牌價"] === null || r["牌價"] === "") ? null : Number(r["牌價"]))
+            : Number(r["一線消費者售價"]),
+          warrantyPrice: (r["保修廠價"] === undefined || r["保修廠價"] === null || r["保修廠價"] === "")
+            ? ((r["保修廠"] === undefined || r["保修廠"] === null || r["保修廠"] === "") ? null : Number(r["保修廠"]))
+            : Number(r["保修廠價"]),
           remark: r["備註"] || ""
         });
       });
@@ -402,14 +410,19 @@ async function restoreFullBackup(wb, statusEl){
     + `（提醒：每筆紀錄過去的逐次編輯歷程無法透過Excel完整保留，但庫存數量、成本、儲位、生產日期都已正確還原）。`;
 }
 
+// 偵測KYB報價單格式：支援新版（避震款式/廠牌/車型/年份代碼/料號/保修廠價/一線消費者售價）
+// 跟舊版（車型/訂價/牌價/保修廠）兩種表頭，新版優先判斷。
 function detectKybSheet(wb){
   for(const sheetName of wb.SheetNames){
     const ws = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, blankrows:true});
     for(let r=0; r<Math.min(rows.length, 10); r++){
       const row = rows[r] || [];
+      if(row.includes("車型") && row.includes("一線消費者售價")){
+        return { rows, headerRowIndex: r, format: "new" };
+      }
       if(row.includes("車型") && row.includes("訂價") && row.includes("牌價")){
-        return { rows, headerRowIndex: r };
+        return { rows, headerRowIndex: r, format: "old" };
       }
     }
   }
@@ -422,46 +435,89 @@ async function tryImportKybSheet(wb, statusEl){
 
   const header = detected.rows[detected.headerRowIndex];
   const modelIdx = header.indexOf("車型");
-  const listIdx = header.indexOf("訂價");
-  const catalogIdx = header.indexOf("牌價");
-  const warrantyIdx = header.indexOf("保修廠");
-
   const dataRows = detected.rows.slice(detected.headerRowIndex + 1);
   const merged = new Map();
   let skippedNoteCount = 0;
-  dataRows.forEach(row=>{
-    if(!row) return;
-    const modelRaw = row[modelIdx];
-    const modelStr = (modelRaw==null?"":modelRaw).toString().trim();
-    if(!modelStr) return;
-    if(modelStr.length > 30){ skippedNoteCount++; return; }
-    const toNum = (v)=> (v===null||v===undefined||v==="") ? null : Number(v);
-    merged.set(norm(modelStr), {
-      carModel: modelStr,
-      listPrice: toNum(row[listIdx]),
-      catalogPrice: toNum(row[catalogIdx]),
-      warrantyPrice: warrantyIdx>=0 ? toNum(row[warrantyIdx]) : null
+  const toNum = (v)=> (v===null||v===undefined||v==="") ? null : Number(v);
+
+  if(detected.format === "new"){
+    const bucketIdx = header.indexOf("避震款式");
+    const makeIdx = header.indexOf("廠牌");
+    const yearIdx = header.indexOf("年份代碼");
+    const partIdx = header.indexOf("料號");
+    const warrantyIdx = header.indexOf("保修廠價");
+    const retailIdx = header.indexOf("一線消費者售價");
+    const remarkIdx = header.indexOf("備註");
+
+    dataRows.forEach(row=>{
+      if(!row) return;
+      const modelRaw = row[modelIdx];
+      const modelStr = (modelRaw==null?"":modelRaw).toString().trim();
+      if(!modelStr) return;
+      if(modelStr.length > 60){ skippedNoteCount++; return; }
+      const bucketType = bucketIdx>=0 ? (row[bucketIdx]||"").toString().trim() : "";
+      const key = norm(modelStr) + "|" + bucketType;
+      merged.set(key, {
+        carModel: modelStr,
+        bucketType,
+        carMake: makeIdx>=0 ? (row[makeIdx]||"").toString().trim() : "",
+        yearCode: yearIdx>=0 ? (row[yearIdx]==null?"":row[yearIdx].toString().trim()) : "",
+        partNo: partIdx>=0 ? (row[partIdx]||"").toString().trim() : "",
+        warrantyPrice: warrantyIdx>=0 ? toNum(row[warrantyIdx]) : null,
+        catalogPrice: retailIdx>=0 ? toNum(row[retailIdx]) : null,
+        remark: remarkIdx>=0 ? (row[remarkIdx]||"").toString().trim() : ""
+      });
     });
-  });
+  } else {
+    const listIdx = header.indexOf("訂價");
+    const catalogIdx = header.indexOf("牌價");
+    const warrantyIdx = header.indexOf("保修廠");
+
+    dataRows.forEach(row=>{
+      if(!row) return;
+      const modelRaw = row[modelIdx];
+      const modelStr = (modelRaw==null?"":modelRaw).toString().trim();
+      if(!modelStr) return;
+      // 報價單常常在車型欄下方接一段免責聲明／注意事項文字（跟車型同一欄），
+      // 車型名稱通常很短，這種備註文字明顯很長，用長度判斷跳過，避免被誤當成車型匯入。
+      if(modelStr.length > 30){ skippedNoteCount++; return; }
+      // 舊格式沒有避震款式欄位，一律視為白桶（沿用原本白桶車型的匯入方式）
+      const key = norm(modelStr) + "|白桶";
+      merged.set(key, {
+        carModel: modelStr,
+        bucketType: "白桶",
+        carMake: "",
+        yearCode: "",
+        partNo: "",
+        // 訂價欄位不再使用；牌價視同一線消費者售價
+        catalogPrice: toNum(row[catalogIdx]) != null ? toNum(row[catalogIdx]) : toNum(row[listIdx]),
+        warrantyPrice: warrantyIdx>=0 ? toNum(row[warrantyIdx]) : null,
+        remark: ""
+      });
+    });
+  }
 
   const rowsToApply = Array.from(merged.values());
-  statusEl.textContent = `偵測到KYB報價單，共 ${rowsToApply.length} 筆車型${skippedNoteCount?`（已跳過看起來像備註文字的 ${skippedNoteCount} 列）`:""}，匯入中...`;
+  statusEl.textContent = `偵測到KYB報價單（${detected.format==='new'?'新版含桶色/廠牌/料號':'舊版'}），共 ${rowsToApply.length} 筆車型${skippedNoteCount?`（已跳過看起來像備註文字的 ${skippedNoteCount} 列）`:""}，匯入中...`;
 
   let created = 0, updated = 0;
   let batch = db.batch();
   let opCount = 0;
   for(const r of rowsToApply){
-    const existing = kybItemsCache.find(it=> norm(it.carModel)===norm(r.carModel));
+    const existing = kybItemsCache.find(it=> norm(it.carModel)===norm(r.carModel) && (it.bucketType||"")===r.bucketType);
+    const payload = {
+      carMake: r.carMake, bucketType: r.bucketType, yearCode: r.yearCode, partNo: r.partNo,
+      catalogPrice: r.catalogPrice, warrantyPrice: r.warrantyPrice
+    };
+    if(r.remark) payload.remark = r.remark;
     if(existing){
-      batch.update(db.collection("kybItems").doc(existing.id), {
-        listPrice: r.listPrice, catalogPrice: r.catalogPrice, warrantyPrice: r.warrantyPrice
-      });
+      batch.update(db.collection("kybItems").doc(existing.id), payload);
       updated++;
     } else {
       const ref = db.collection("kybItems").doc();
       batch.set(ref, {
-        carModel: r.carModel, brand: "KYB", remark: "", locations: {},
-        listPrice: r.listPrice, catalogPrice: r.catalogPrice, warrantyPrice: r.warrantyPrice
+        carModel: r.carModel, brand: "KYB", remark: r.remark || "", locations: {},
+        ...payload
       });
       created++;
     }
@@ -470,7 +526,7 @@ async function tryImportKybSheet(wb, statusEl){
   }
   if(opCount > 0) await batch.commit();
 
-  statusEl.textContent = `KYB報價單匯入完成！新增 ${created} 筆車型、更新 ${updated} 筆價格${skippedNoteCount?`（已跳過看起來像備註文字的 ${skippedNoteCount} 列）`:""}。`;
+  statusEl.textContent = `KYB報價單匯入完成！新增 ${created} 筆車型、更新 ${updated} 筆${skippedNoteCount?`（已跳過看起來像備註文字的 ${skippedNoteCount} 列）`:""}。`;
   return true;
 }
 
