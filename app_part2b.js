@@ -31,9 +31,10 @@ async function exportFullBackup(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(kybItemsSnap.docs.map(d=>{
     const it = {id:d.id, ...d.data()};
     return {
-      id: it.id, 車型: it.carModel, 品牌: "KYB", 總量: kybTotalQty(it),
-      儲位分布: kybLocSummary(it), 訂價: it.listPrice!=null?it.listPrice:"", 牌價: it.catalogPrice!=null?it.catalogPrice:"",
-      保修廠: it.warrantyPrice!=null?it.warrantyPrice:"", 備註: it.remark||""
+      id: it.id, 車型: it.carModel, 廠牌: it.carMake||"", 避震款式: it.bucketType||"", 總量: kybTotalQty(it),
+      儲位分布: kybLocSummary(it), 年份代碼: it.yearCode||"", 料號: it.partNo||"",
+      保修廠價: it.warrantyPrice!=null?it.warrantyPrice:"", 一線消費者售價: it.catalogPrice!=null?it.catalogPrice:"",
+      備註: it.remark||""
     };
   })), "KYB品項主檔");
   const kybLocSnap = await db.collection("kybLocations").get();
@@ -72,6 +73,9 @@ function renderTxns(){
   if(salesQ) list = list.filter(t=> norm(t.salesperson || t.operator || "").includes(salesQ));
   if(custQ) list = list.filter(t=> norm(t.customerName || "").includes(custQ));
 
+  // 新做的動作排越上方：優先用 createdAt(精確時間戳記)排序，沒有的舊資料用 date 當備援
+  list.sort((a,b)=> (b.createdAt||b.date||"").localeCompare(a.createdAt||a.date||""));
+
   document.getElementById("txnCount").textContent = `共 ${list.length} 筆`;
   body.innerHTML = list.map(t=>{
     const item = itemsCache.find(i=>i.id===t.itemId);
@@ -88,7 +92,7 @@ function renderTxns(){
     </tr>`;
   }).join("") || `<tr><td colspan="8" class="empty">尚無紀錄</td></tr>`;
 
-  body.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click", ()=>editTxn(b.dataset.edit)));
+  body.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click", ()=>openEditTxnModal(b.dataset.edit)));
   body.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click", ()=>deleteTxn(b.dataset.del)));
 }
 

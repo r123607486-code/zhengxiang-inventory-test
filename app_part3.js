@@ -7,37 +7,101 @@
 
   await itemRef.update({locations: allLocs});
   await db.collection("transactions").add({
-    itemId, type, qty, loc, batchDate: usedDate, date: todayStr(), operator: currentUser.name, editLog: []
+    itemId, type, qty, loc, batchDate: usedDate, date: todayStr(), operator: currentUser.name, editLog: [],
+    createdAt: new Date().toISOString()
   });
   closeModal();
 }
 
-async function editTxn(txnId){
+// 編輯進銷貨紀錄：日期、數量、儲位、業務、客戶姓名都可以改。
+// 儲位一定要從現有儲位清單選（不能自己打字），生產日期批次維持原本可填可留空的方式。
+// 不管改哪個欄位，都會先把「舊紀錄」對庫存的影響完全還原，再套用「新紀錄」的影響，確保庫存數量一定會跟著正確增減。
+function openEditTxnModal(txnId){
   const t = txnCache.find(x=>x.id===txnId);
   if(!t) return;
-  const newQty = Number(prompt(`目前數量為 ${t.qty}，請輸入修正後的數量：`, t.qty));
-  if(!newQty || newQty<=0) return;
-  const diff = newQty - t.qty;
+  const item = itemsCache.find(i=>i.id===t.itemId);
+  const itemLabel = item ? `${item.brand} ${item.spec}（${item.model||""}）` : "(品項已刪除，仍可編輯其他資訊，但無法改儲位)";
+  const html = `
+    <div class="sheet-head"><h2>編輯進銷貨紀錄</h2><button class="sheet-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row"><label>品項</label><input type="text" value="${escapeHtml(itemLabel)}" disabled></div>
+    <div class="form-row"><label>類型</label><input type="text" value="${t.type==='in'?'進貨':'銷貨'}" disabled></div>
+    <div class="form-row"><label>日期</label><input type="date" id="editTxnDate" value="${escapeHtml(t.date||todayStr())}"></div>
+    <div class="form-row"><label>數量</label><input type="number" id="editTxnQty" min="1" value="${t.qty}"></div>
+    <div class="form-row"><label>儲位</label>
+      <select id="editTxnLoc">${locationsCache.map(l=>`<option value="${escapeHtml(l.code)}" ${l.code===t.loc?'selected':''}>${escapeHtml(l.code)}</option>`).join("")}</select>
+    </div>
+    <div class="form-row"><label>生產日期（這批的4碼DOT代碼，留空表示不指定批次）</label><input type="text" id="editTxnBatchDate" value="${escapeHtml(t.batchDate||"")}" placeholder="例如 2523"></div>
+    <div class="form-row"><label>業務</label><input type="text" id="editTxnSalesperson" value="${escapeHtml(t.salesperson||"")}"></div>
+    <div class="form-row"><label>客戶姓名</label><input type="text" id="editTxnCustomerName" value="${escapeHtml(t.customerName||"")}"></div>
+    <div class="form-actions">
+      <button onclick="closeModal()">取消</button>
+      <button class="primary" id="editTxnSaveBtn">儲存</button>
+    </div>`;
+  openModal(html);
+
+  document.getElementById("editTxnSaveBtn").addEventListener("click", async ()=>{
+    const newDate = document.getElementById("editTxnDate").value || todayStr();
+    const newQty = Number(document.getElementById("editTxnQty").value);
+    const newLoc = document.getElementById("editTxnLoc").value;
+    const newBatchDate = document.getElementById("editTxnBatchDate").value.trim() || null;
+    const newSalesperson = document.getElementById("editTxnSalesperson").value.trim();
+    const newCustomerName = document.getElementById("editTxnCustomerName").value.trim();
+    if(!newQty || newQty<=0){ alert("請輸入正確的數量"); return; }
+    if(!newLoc){ alert("請選擇儲位"); return; }
+    try{
+      await saveEditTxn(t, { date:newDate, qty:newQty, loc:newLoc, batchDate:newBatchDate, salesperson:newSalesperson, customerName:newCustomerName });
+      closeModal();
+    }catch(e){
+      alert("儲存失敗："+e.message);
+    }
+  });
+}
+
+async function saveEditTxn(t, next){
   const itemRef = db.collection("items").doc(t.itemId);
   const itemSnap = await itemRef.get();
   if(itemSnap.exists){
     const item = itemSnap.data();
     const allLocs = {...(item.locations||{})};
-    let batches = normalizeBatches(allLocs[t.loc], item).map(b=>({...b}));
-    let idx = ("batchDate" in t) ? batches.findIndex(b=> (b.productionDate||null) === (t.batchDate||null)) : 0;
-    if(idx < 0) idx = 0;
-    if(batches.length === 0){ batches.push({ qty: 0, productionDate: t.batchDate||null }); idx = 0; }
-    const sign = t.type === "in" ? 1 : -1;
-    batches[idx].qty = (batches[idx].qty||0) + diff*sign;
-    if(batches[idx].qty <= 0) batches.splice(idx, 1);
-    allLocs[t.loc] = batches.filter(b=>b.qty>0);
+
+    // 1) 先把「舊紀錄」對庫存的影響完全還原（進貨要扣掉、銷貨要加回去）
+    let oldBatches = normalizeBatches(allLocs[t.loc], item).map(b=>({...b}));
+    let oldIdx = oldBatches.findIndex(b=> (b.productionDate||null) === (t.batchDate||null));
+    if(oldIdx < 0){ oldBatches.push({ qty: 0, productionDate: t.batchDate||null }); oldIdx = oldBatches.length-1; }
+    const oldSign = t.type === "in" ? -1 : 1;
+    oldBatches[oldIdx].qty = (oldBatches[oldIdx].qty||0) + t.qty*oldSign;
+    if(oldBatches[oldIdx].qty <= 0) oldBatches.splice(oldIdx, 1);
+    allLocs[t.loc] = oldBatches.filter(b=>b.qty>0);
     if(allLocs[t.loc].length === 0) delete allLocs[t.loc];
-    await itemRef.update({locations: allLocs});
+
+    // 2) 在還原後的庫存基礎上，套用「新紀錄」的內容
+    let newBatches = normalizeBatches(allLocs[next.loc], item).map(b=>({...b}));
+    let newIdx = newBatches.findIndex(b=> (b.productionDate||null) === (next.batchDate||null));
+    if(newIdx < 0){
+      if(t.type === "out"){ throw new Error("這個儲位／批次目前沒有庫存，無法把銷貨紀錄改到這裡，請確認儲位或生產日期"); }
+      newBatches.push({ qty: 0, productionDate: next.batchDate||null });
+      newIdx = newBatches.length-1;
+    }
+    const newSign = t.type === "in" ? 1 : -1;
+    const resultQty = (newBatches[newIdx].qty||0) + next.qty*newSign;
+    if(t.type === "out" && resultQty < 0){
+      throw new Error(`這個儲位／批次目前只有 ${newBatches[newIdx].qty||0} 條，不夠改成銷貨 ${next.qty} 條`);
+    }
+    newBatches[newIdx].qty = resultQty;
+    if(newBatches[newIdx].qty <= 0) newBatches.splice(newIdx, 1);
+    allLocs[next.loc] = newBatches.filter(b=>b.qty>0);
+    if(allLocs[next.loc].length === 0) delete allLocs[next.loc];
+
+    await itemRef.update({ locations: allLocs });
   }
-  await db.collection("transactions").doc(txnId).update({
-    qty: newQty,
+
+  await db.collection("transactions").doc(t.id).update({
+    date: next.date, qty: next.qty, loc: next.loc, batchDate: next.batchDate,
+    salesperson: next.salesperson, customerName: next.customerName,
     editLog: firebase.firestore.FieldValue.arrayUnion({
-      before: t.qty, after: newQty, time: new Date().toISOString(), by: currentUser.name
+      before: { date:t.date||null, qty:t.qty, loc:t.loc, batchDate:t.batchDate||null, salesperson:t.salesperson||"", customerName:t.customerName||"" },
+      after: { date:next.date, qty:next.qty, loc:next.loc, batchDate:next.batchDate, salesperson:next.salesperson, customerName:next.customerName },
+      time: new Date().toISOString(), by: currentUser.name
     })
   });
 }
@@ -207,7 +271,8 @@ async function submitOrderTxn(order, loc, batchDate){
     date: todayStr(), operator: currentUser.name,
     salesperson: order.requestedByName || "", customerName: order.customerName || "",
     customerContact: order.customerContact || "", customerNote: order.customerNote || "",
-    orderId: order.id, editLog: []
+    orderId: order.id, editLog: [],
+    createdAt: new Date().toISOString()
   });
 }
 
