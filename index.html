@@ -31,7 +31,7 @@
       </button>
       <button class="category-card" data-category="kyb">
         <span class="category-icon" id="categoryIconKyb"></span>
-        <span class="category-label">KYB Strut Plus Sport 白桶</span>
+        <span class="category-label">KYB避震器</span>
       </button>
     </div>
   </div>
@@ -202,7 +202,7 @@
     <section class="page" id="page-kyb-query">
       <div class="page-head">
         <div class="toolbar">
-          <input type="text" id="kybQueryBox" placeholder="輸入車型關鍵字，例如 Altis">
+          <input type="text" id="kybQueryBox" placeholder="輸入車型或廠牌關鍵字，例如 Altis 或 TOYOTA">
         </div>
         <div class="count" id="kybQueryCount"></div>
       </div>
@@ -213,14 +213,14 @@
     <section class="page" id="page-kyb-master">
       <div class="page-head">
         <div class="toolbar">
-          <input type="text" id="kybMasterBox" placeholder="輸入車型篩選">
+          <input type="text" id="kybMasterBox" placeholder="輸入車型或廠牌篩選">
           <button id="kybExportBtn">匯出目前結果(Excel)</button>
         </div>
         <div class="count" id="kybMasterCount"></div>
       </div>
       <div class="table-wrap">
         <table class="grid">
-          <thead><tr><th>車型</th><th>品牌</th><th>總量</th><th>儲位分布（點擊可調整／搬倉）</th><th>訂價</th><th>牌價</th><th>保修廠</th><th>備註</th><th>操作</th></tr></thead>
+          <thead><tr><th>車型</th><th>廠牌</th><th>避震款式</th><th>總量</th><th>儲位分布（點擊可調整／搬倉）</th><th>年份代碼</th><th>料號</th><th>保修廠價</th><th>一線消費者售價</th><th>備註</th><th>操作</th></tr></thead>
           <tbody id="kybMasterBody"></tbody>
         </table>
       </div>
@@ -302,7 +302,7 @@
         <input type="file" id="kybImportFile" accept=".xlsx">
         <button class="primary" id="kybImportBtn">開始匯入</button>
       </div>
-      <div class="count" id="kybImportStatus">這個工具僅適用於KYB資料，不會動到輪胎的品項／儲位：<br>上傳廠商提供的KYB報價單（含「車型」「訂價」「牌價」欄位）→ 自動建立/更新KYB車型清單（庫存與儲位請自行在「KYB庫存總表」輸入）。</div>
+      <div class="count" id="kybImportStatus">這個工具僅適用於KYB資料，不會動到輪胎的品項／儲位：<br>上傳整合好的KYB報價表（含「避震款式」「廠牌」「車型」「年份代碼」「料號」「保修廠價」「一線消費者售價」欄位）→ 自動建立/更新KYB車型清單，白桶／藍桶／深藍桶會依「車型＋避震款式」分別比對，不會互相覆蓋。也相容舊版報價單（僅含「車型」「訂價」「牌價」「保修廠」欄位，會視為白桶匯入）。（庫存與儲位請自行在「KYB庫存總表」輸入）。</div>
     </section>
   </main>
 </div>
@@ -320,7 +320,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script src="firebase-config.js"></script>
-<!-- app.js 實在太大，之前拆成多個 app_part*.js 檔案，但別的 <script src> 各自狔立解析，不能跨檔案接續中斷的函式，所以改用 fetch+eval 先拼成完整的一段程式碼再執行。 -->
+<!-- app.js 實在太大，拆成多個 app_part*.js 檔案，但別的 <script src> 各自狔立解析，不能跨檔案接續中斷的函式，所以改用 fetch+eval 先拼成完整的一段程式碼再執行。 -->
 <script>
 (function(){
   var files = ["app.js","app_part2.js","app_part2b.js","app_part3.js","app_part4.js","app_part5.js","app_part6.js"];
