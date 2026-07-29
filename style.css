@@ -79,7 +79,7 @@ table.grid .loc-line.loc-pending{font-weight:700;color:#c07a12;}
 .card .code-row{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
 .card .code{font-weight:700;font-size:14.5px;}
 .card .sub{font-size:12.5px;color:var(--muted);margin:4px 0;}
-.card .qty{font-size:16px;font-weight:700;color:var(--red-dark);}
+.card .qty{font-size:16px;font-weight:700;color:var(--red-dark);word-break:keep-all;}
 .card .tag-expire{display:inline-block;background:#fde8e8;color:#a31e22;font-size:11px;padding:2px 8px;border-radius:6px;margin-left:6px;}
 .order-btn{display:inline-flex;align-items:center;gap:4px;background:var(--red);color:#fff;border:none;border-radius:20px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;flex-shrink:0;}
 .order-btn svg{width:14px;height:14px;stroke:#fff;}
@@ -126,3 +126,5 @@ table.grid .loc-line.loc-expired{color:#a31e22;font-weight:700;}
 
 .banner{background:#fff6e6;border:1px solid #f0d9a8;color:var(--amber);padding:10px 14px;border-radius:10px;margin-bottom:12px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
 .banner button{border:1px solid var(--amber);background:#fff;color:var(--amber);border-radius:8px;padding:6px 12px;font-size:12.5px;cursor:pointer;}
+
+.load-more-btn{width:100%;padding:10px;border:1px solid var(--border);background:#fff;border-radius:8px;font-size:13px;cursor:pointer;color:var(--muted);margin-top:6px;}
