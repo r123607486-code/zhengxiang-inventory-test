@@ -27,6 +27,11 @@ document.getElementById("importBtn").addEventListener("click", async ()=>{
   const data = await file.arrayBuffer();
   const wb = XLSX.read(data, {type:"array"});
 
+  if(wb.Sheets["交接資訊"]){
+    await restoreHandoverBackup(wb, statusEl);
+    return;
+  }
+
   if(wb.Sheets["品項主檔"] && wb.Sheets["儲位主檔"]){
     await restoreFullBackup(wb, statusEl);
     return;
