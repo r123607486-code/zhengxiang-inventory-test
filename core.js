@@ -50,7 +50,7 @@ function norm(s){ return (s || "").toString().toUpperCase().replace(/\s+/g, "");
 function todayStr(){ return new Date().toISOString().slice(0,10); }
 function monthsBetween(dateStr){
   if(!dateStr) return null;
-  const m = /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/.exec(String(dateStr).trim());
+  const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(String(dateStr).trim());
   if(!m) return null;
   const year = Number(m[1]);
   if(year < 2015 || year > 2035) return null;
