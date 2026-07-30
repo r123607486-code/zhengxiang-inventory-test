@@ -16,7 +16,7 @@ async function confirmErpSalesOrder(id){
 
 
 // ------------------------------------------------------------
-// 待轉銷貨：輪胎與 KYB 的既有「銷貨」只帶入 ERP，不修改來源、不再次扣庫存。
+// 待轉銷貨：輪胎與 KYB 的既有「銷貨」只帶入銷貨單資訊，不修改來源、不再次扣庫存。
 // ------------------------------------------------------------
 function erpSourceItemLabel(sourceType, transaction){
   if(sourceType === "tire"){
@@ -44,9 +44,9 @@ function renderErpTransfers(){
   const outstanding = sources.filter(s => !linked.has(s.key));
   el.innerHTML = `
     <div class="erp-page-heading"><div><p class="erp-kicker">IMPORT FROM INVENTORY SALES</p><h1>待建立銷貨單</h1><p>所有輪胎與 KYB 銷貨都集中在此。帶入後只補帳務資料，不影響既有庫存。</p></div></div>
-    <div class="erp-transfer-summary"><article><strong>${sources.length}</strong><span>全部來源銷貨</span></article><article><strong>${outstanding.length}</strong><span>尚未帶入 ERP</span></article><article><strong>${sources.length-outstanding.length}</strong><span>已建立 ERP 銷貨單</span></article></div>
+    <div class="erp-transfer-summary"><article><strong>${sources.length}</strong><span>全部來源銷貨</span></article><article><strong>${outstanding.length}</strong><span>尚未帶入銷貨單資訊</span></article><article><strong>${sources.length-outstanding.length}</strong><span>已建立 ERP 銷貨單</span></article></div>
     <section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">UNLINKED SALES</p><h2>尚未帶入的銷貨</h2></div><span class="erp-counter">${outstanding.length} 筆</span></div>
-      ${outstanding.length ? '<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>日期</th><th>來源</th><th>品項</th><th>數量</th><th>客戶</th><th>業務</th><th></th></tr></thead><tbody>' + outstanding.map(s => '<tr><td>' + erpEscape(s.date || "-") + '</td><td><span class="erp-source-tag ' + s.sourceType + '">' + (s.sourceType === "tire" ? "輪胎" : "KYB") + '</span></td><td><strong>' + erpEscape(s.itemName) + '</strong></td><td>' + s.quantity + '</td><td>' + erpEscape(s.customerName || "未填寫") + '</td><td>' + erpEscape(s.salesperson || "-") + '</td><td><button class="erp-primary erp-transfer-btn" data-erp-transfer="' + erpEscape(s.key) + '">帶入 ERP</button></td></tr>').join("") + '</tbody></table></div>' : '<div class="erp-empty"><strong>目前沒有待轉銷貨。</strong><br>新建立的輪胎或 KYB 銷貨會自動出現在這裡。</div>'}
+      ${outstanding.length ? '<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>日期</th><th>來源</th><th>品項</th><th>數量</th><th>客戶</th><th>業務</th><th></th></tr></thead><tbody>' + outstanding.map(s => '<tr><td>' + erpEscape(s.date || "-") + '</td><td><span class="erp-source-tag ' + s.sourceType + '">' + (s.sourceType === "tire" ? "輪胎" : "KYB") + '</span></td><td><strong>' + erpEscape(s.itemName) + '</strong></td><td>' + s.quantity + '</td><td>' + erpEscape(s.customerName || "未填寫") + '</td><td>' + erpEscape(s.salesperson || "-") + '</td><td><button class="erp-primary erp-transfer-btn" data-erp-transfer="' + erpEscape(s.key) + '">帶入銷貨單資訊</button></td></tr>').join("") + '</tbody></table></div>' : '<div class="erp-empty"><strong>目前沒有待轉銷貨。</strong><br>新建立的輪胎或 KYB 銷貨會自動出現在這裡。</div>'}
     </section>
     <section class="erp-panel erp-linked-panel"><div class="erp-panel-title"><div><p class="erp-kicker">LINKED SALES</p><h2>已帶入紀錄</h2></div></div>
       ${linked.size ? '<div class="erp-list">' + sources.filter(s => linked.has(s.key)).map(s => { const o=linked.get(s.key); return '<article class="erp-list-row"><div class="erp-avatar">' + (s.sourceType === "tire" ? "輪" : "K") + '</div><div><strong>' + erpEscape(s.itemName) + '</strong><p>' + erpEscape(o.orderNo) + " · " + erpEscape(s.date) + " · " + erpStatus(o.status) + '</p></div><button class="erp-edit-btn" data-erp-edit-linked="' + erpEscape(o.id) + '">查看／修改</button></article>'; }).join("") + '</div>' : '<div class="erp-empty">尚無已帶入紀錄。</div>'}
@@ -132,8 +132,22 @@ function renderErpSales(){
   if(!el.querySelector(".erp-source-only-notice")){
     const notice=document.createElement("section");
     notice.className="erp-panel erp-source-only-notice";
-    notice.innerHTML='<div class="erp-panel-title"><div><p class="erp-kicker">INVENTORY FIRST</p><h2>銷貨單必須由庫存銷貨帶入</h2></div></div><p>請先在「商品與庫存」完成輪胎或 KYB 銷貨與扣庫存，再到「待建立銷貨單」帶入 ERP。這裡只處理帳務、月結、收款與列印，不會直接扣庫存。</p><button class="erp-primary" id="erpGoTransfers">前往待建立銷貨單</button></section>';
+    notice.innerHTML='<div class="erp-panel-title"><div><p class="erp-kicker">INVENTORY FIRST</p><h2>銷貨單必須由庫存銷貨帶入</h2></div></div><p>請先在「商品與庫存」完成輪胎或 KYB 銷貨與扣庫存，再到「待建立銷貨單」帶入銷貨單資訊。這裡只處理帳務、月結、收款與列印，不會直接扣庫存。</p><button class="erp-primary" id="erpGoTransfers">前往待建立銷貨單</button></section>';
     el.querySelector(".erp-page-heading").insertAdjacentElement("afterend",notice);
     document.getElementById("erpGoTransfers").addEventListener("click",()=>showErpView("transfers"));
   }
+}
+
+// ERP 銷貨單為帳務補登用途：不可手動新增或調整庫存品項。
+const renderErpSalesAccountingOnly = renderErpSales;
+function renderErpSales(){
+  renderErpSalesAccountingOnly();
+  const el=document.getElementById("erp-page-sales");
+  if(!el)return;
+  el.querySelectorAll(".erp-form-panel").forEach(panel=>panel.style.display="none");
+  el.querySelectorAll("[data-edit]").forEach(btn=>{
+    const order=erpSalesOrdersCache.find(o=>o.id===btn.dataset.edit);
+    if(order&&order.sourceTransactionId) btn.textContent="補齊帳務資訊";
+    if(order&&!order.sourceTransactionId){btn.textContent="不可修改品項";btn.disabled=true;}
+  });
 }
