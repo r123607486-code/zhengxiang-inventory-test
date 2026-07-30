@@ -33,6 +33,11 @@
         <span class="category-icon" id="categoryIconKyb"></span>
         <span class="category-label">KYB避震器</span>
       </button>
+      <button class="category-card category-card-erp hidden" id="erpCategoryCard" data-category="erp">
+        <span class="category-icon" id="categoryIconErp"></span>
+        <span class="category-label">ERP 管理中心</span>
+        <span class="category-sub-label">帳務與銷貨作業</span>
+      </button>
     </div>
   </div>
 </div>
@@ -307,6 +312,10 @@
   </main>
 </div>
 
+
+<!-- ERP 管理中心（僅管理者可進入） -->
+<div id="erpApp" class="erp-app hidden"></div>
+
 <!-- 通用 modal 容器 -->
 <div id="modalOverlay" class="overlay hidden">
   <div class="sheet" id="modalSheet"></div>
@@ -330,5 +339,6 @@
 <script src="handover-backup.js"></script>
 <script src="kyb-inventory.js"></script>
 <script src="kyb-transactions-orders.js"></script>
+<script src="erp.js"></script>
 </body>
 </html>

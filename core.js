@@ -22,7 +22,8 @@ const ICONS = {
 
 const CATEGORY_ICONS = {
   tire: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.4"/><line x1="12" y1="3" x2="12" y2="6.2"/><line x1="12" y1="17.8" x2="12" y2="21"/><line x1="3" y1="12" x2="6.2" y2="12"/><line x1="17.8" y1="12" x2="21" y2="12"/></svg>',
-  kyb: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="2" x2="12" y2="8"/><rect x="8.5" y="8" width="7" height="10" rx="1.5"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="9" y1="10.5" x2="15" y2="10.5"/><line x1="9" y1="13.5" x2="15" y2="13.5"/></svg>'
+  kyb: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="2" x2="12" y2="8"/><rect x="8.5" y="8" width="7" height="10" rx="1.5"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="9" y1="10.5" x2="15" y2="10.5"/><line x1="9" y1="13.5" x2="15" y2="13.5"/></svg>',
+  erp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 16v-3m5 3V8m5 8v-5"/><path d="M7 7h10"/></svg>'
 };
 
 let currentUser = null;
@@ -161,6 +162,7 @@ auth.onAuthStateChanged(async (user)=>{
   if(!user){
     document.getElementById("splash").classList.remove("hidden");
     document.getElementById("app").classList.add("hidden");
+    document.getElementById("erpApp").classList.add("hidden");
     currentUser = null;
     return;
   }
@@ -179,14 +181,26 @@ auth.onAuthStateChanged(async (user)=>{
 
 document.getElementById("categoryIconTire").innerHTML = CATEGORY_ICONS.tire;
 document.getElementById("categoryIconKyb").innerHTML = CATEGORY_ICONS.kyb;
+document.getElementById("categoryIconErp").innerHTML = CATEGORY_ICONS.erp;
 
 function showCategoryScreen(){
   document.getElementById("app").classList.add("hidden");
+  document.getElementById("erpApp").classList.add("hidden");
+  document.getElementById("erpCategoryCard").classList.toggle("hidden", !currentUser || currentUser.role !== "admin");
   document.getElementById("categoryScreen").classList.remove("hidden");
 }
 
 function switchToCategory(cat){
+  if(cat === "erp"){
+    if(!currentUser || currentUser.role !== "admin"){ alert("ERP 管理中心僅限管理者使用"); return; }
+    currentCategory = "erp";
+    document.getElementById("categoryScreen").classList.add("hidden");
+    document.getElementById("app").classList.add("hidden");
+    openErpWorkspace();
+    return;
+  }
   currentCategory = cat;
+  document.getElementById("erpApp").classList.add("hidden");
   document.getElementById("categoryScreen").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   document.getElementById("appTitle").textContent =
