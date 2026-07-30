@@ -119,3 +119,21 @@ function renderErpSales(){
 async function saveErpMulti(form,getLines,status){if(!form.reportValidity())return;const lines=getLines();if(!lines.length)return alert("請至少填寫一個品項。");const t=erpCalcLines(lines,form.elements.taxMode.value),customer=erpCustomersCache.find(c=>c.id===form.elements.customerId.value),data={orderNo:form.elements.orderNo.value.trim(),orderDate:form.elements.orderDate.value,customerId:customer?customer.id:null,customerName:form.elements.customerName.value.trim(),salesperson:form.elements.salesperson.value.trim(),taxMode:form.elements.taxMode.value,lines, itemSource:lines[0].itemSource,itemName:lines[0].itemName,quantity:lines[0].quantity,unitPrice:lines[0].unitPrice,lineAmount:t.lineAmount,amount:t.lineAmount,subtotalAmount:t.subtotal,taxAmount:t.taxAmount,totalAmount:t.totalAmount,taxRate:t.taxRate,notes:form.elements.notes.value.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};try{if(erpSalesEditingId){await db.collection("erpSalesOrders").doc(erpSalesEditingId).update({...data,status});erpSalesEditingId=null;}else{await db.collection("erpSalesOrders").add({...data,status,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});form.reset();} }catch(e){console.error(e);alert("儲存失敗，請稍後再試。");}}
 
 async function deleteErpDraft(id){const o=erpSalesOrdersCache.find(x=>x.id===id);if(!o||o.status!=="draft")return;if(!confirm("刪除此銷貨草稿？此操作僅限未送出的草稿。"))return;try{await db.collection("erpSalesOrders").doc(id).delete();logErpAudit("sales_draft_deleted",id,{orderNo:o.orderNo});}catch(e){console.error(e);alert("刪除失敗。");}}
+
+
+// ERP 銷貨單只允許由輪胎／KYB 庫存銷貨帶入，避免 ERP 手動出貨影響庫存。
+const renderErpSalesFromInventory = renderErpSales;
+function renderErpSales(){
+  renderErpSalesFromInventory();
+  const el=document.getElementById("erp-page-sales");
+  if(!el)return;
+  const formPanel=el.querySelector(".erp-form-panel");
+  if(formPanel)formPanel.style.display="none";
+  if(!el.querySelector(".erp-source-only-notice")){
+    const notice=document.createElement("section");
+    notice.className="erp-panel erp-source-only-notice";
+    notice.innerHTML='<div class="erp-panel-title"><div><p class="erp-kicker">INVENTORY FIRST</p><h2>銷貨單必須由庫存銷貨帶入</h2></div></div><p>請先在「商品與庫存」完成輪胎或 KYB 銷貨與扣庫存，再到「待建立銷貨單」帶入 ERP。這裡只處理帳務、月結、收款與列印，不會直接扣庫存。</p><button class="erp-primary" id="erpGoTransfers">前往待建立銷貨單</button></section>';
+    el.querySelector(".erp-page-heading").insertAdjacentElement("afterend",notice);
+    document.getElementById("erpGoTransfers").addEventListener("click",()=>showErpView("transfers"));
+  }
+}
