@@ -13,6 +13,8 @@ let erpKybTransactionsCache = [];
 let erpTireItemsCache = [];
 let erpKybItemsCache = [];
 let erpSalesEditingId = null;
+let erpInvoicesCache = [];
+let erpInvoiceFilter = { customerName:"", from:"", to:"" };
 
 const ERP_ICONS = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 18h7M17.5 14.5v7"/></svg>',
@@ -82,13 +84,15 @@ function buildErpWorkspace(){
         <button class="erp-nav" data-erp-view="customers">${ERP_ICONS.customers}<span>客戶管理</span></button>
         <button class="erp-nav" data-erp-view="sales">${ERP_ICONS.sales}<span>銷貨單</span></button>
         <button class="erp-nav" data-erp-view="transfers">${ERP_ICONS.transfer}<span>待建立銷貨單</span></button>
-        <div class="erp-sidebar-note">第一階段<br>不重複扣庫存・不產生應收</div>
+        <button class="erp-nav" data-erp-view="invoices">${ERP_ICONS.sales}<span>月結開票</span></button>
+        <div class="erp-sidebar-note">第二階段<br>銷貨・月結・列印預覽</div>
       </aside>
       <main class="erp-main">
         <section class="erp-page" id="erp-page-dashboard"></section>
         <section class="erp-page hidden" id="erp-page-customers"></section>
         <section class="erp-page hidden" id="erp-page-sales"></section>
         <section class="erp-page hidden" id="erp-page-transfers"></section>
+        <section class="erp-page hidden" id="erp-page-invoices"></section>
       </main>
     </div>`;
   document.getElementById("erpWhoLabel").textContent = currentUser.name + "｜管理者";
@@ -120,6 +124,14 @@ function startErpListeners(){
     });
     renderErpViews();
   }, err => erpShowDataError(err));
+  db.collection("erpInvoices").onSnapshot(snap => {
+    erpInvoicesCache = snap.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => {
+      const av = a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
+      const bv = b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0;
+      return bv-av;
+    });
+    renderErpViews();
+  }, err => console.error("ERP 月結發票讀取失敗", err));
   db.collection("transactions").onSnapshot(snap => {
     erpTireTransactionsCache = snap.docs.map(d => ({id:d.id, ...d.data()}));
     renderErpViews();
@@ -151,6 +163,7 @@ function renderErpViews(){
   renderErpCustomers();
   renderErpSales();
   renderErpTransfers();
+  renderErpInvoices();
 }
 
 function renderErpDashboard(){
@@ -217,6 +230,32 @@ async function saveErpCustomer(event){
   }finally{ btn.disabled=false; btn.innerHTML=ERP_ICONS.add + " 儲存客戶"; }
 }
 
+function erpTotals(source){
+  const qty = Number(source.quantity) || 0;
+  const price = Number(source.unitPrice) || 0;
+  const lineAmount = Number.isFinite(Number(source.lineAmount)) ? Number(source.lineAmount) :
+    (Number.isFinite(Number(source.amount)) && Number(source.amount) !== 0 ? Number(source.amount) : qty * price);
+  const mode = source.taxMode || "no_tax";
+  if(mode === "tax_excluded"){
+    const subtotal = Math.round(lineAmount);
+    const tax = Math.round(subtotal * 0.05);
+    return { lineAmount:subtotal, subtotal, taxAmount:tax, totalAmount:subtotal+tax, taxRate:0.05 };
+  }
+  if(mode === "tax_included"){
+    const totalAmount = Math.round(lineAmount);
+    const subtotal = Math.round(totalAmount / 1.05);
+    return { lineAmount:totalAmount, subtotal, taxAmount:totalAmount-subtotal, totalAmount, taxRate:0.05 };
+  }
+  const subtotal = Math.round(lineAmount);
+  return { lineAmount:subtotal, subtotal, taxAmount:0, totalAmount:subtotal, taxRate:0 };
+}
+function erpDisplayTotals(order){
+  if(order && (order.subtotalAmount != null || order.totalAmount != null)){
+    return { subtotal:Number(order.subtotalAmount)||0, taxAmount:Number(order.taxAmount)||0, totalAmount:Number(order.totalAmount != null ? order.totalAmount : order.amount)||0 };
+  }
+  return erpTotals(order || {});
+}
+function erpTaxLabel(mode){ return ({no_tax:"不計稅",tax_included:"含稅",tax_excluded:"未稅外加"}[mode] || "不計稅"); }
 function renderErpSales(){
   const el = document.getElementById("erp-page-sales");
   if(!el) return;
@@ -224,66 +263,74 @@ function renderErpSales(){
   const customerOptions = erpCustomersCache.map(c => '<option value="' + erpEscape(c.id) + '"' + ((editing && editing.customerId === c.id) ? " selected" : "") + '>' + erpEscape(c.name) + '</option>').join("");
   const value = (field, fallback="") => erpEscape(editing && editing[field] != null ? editing[field] : fallback);
   const selected = (field, option, fallback) => ((editing && editing[field] === option) || (!editing && fallback === option)) ? " selected" : "";
+  const canEdit = !editing || editing.status !== "confirmed";
+  const actionButtons = !editing
+    ? '<button class="erp-secondary" type="button" id="erpSaveDraftBtn">儲存草稿</button><button class="erp-primary" type="submit">送出待確認</button>'
+    : '<button class="erp-secondary" type="button" id="erpCancelEditBtn">取消修改</button>' +
+      (editing.status === "draft" ? '<button class="erp-secondary" type="button" id="erpSaveDraftBtn">儲存草稿</button><button class="erp-primary" type="button" id="erpSubmitSalesBtn">送出待確認</button>' : '<button class="erp-primary" type="submit">儲存修改</button>');
   el.innerHTML = `
-    <div class="erp-page-heading"><div><p class="erp-kicker">SALES DOCUMENTS</p><h1>銷貨單</h1><p>來源銷貨帶入後，僅在此補齊帳務資料；不會再次扣庫存。</p></div></div>
-    <section class="erp-panel erp-form-panel"><div class="erp-panel-title"><h2>${editing ? "修改銷貨訂單" : "建立銷貨訂單"}</h2><span class="erp-stage-tag">${editing && editing.sourceTransactionId ? "已由庫存銷貨帶入" : "第一階段"}</span></div>
-      <form id="erpSalesForm" class="erp-form">
-        <div class="erp-form-row"><label>銷貨單號<input name="orderNo" value="${value("orderNo",erpOrderNumber())}" required maxlength="40"></label><label>訂單日期<input name="orderDate" type="date" value="${value("orderDate",todayStr())}" required></label></div>
+    <div class="erp-page-heading"><div><p class="erp-kicker">SALES DOCUMENTS</p><h1>銷貨單</h1><p>品項金額自動計算；確認後可預覽列印或納入月結發票。</p></div></div>
+    <section class="erp-panel erp-form-panel"><div class="erp-panel-title"><h2>${editing ? "修改銷貨單" : "建立銷貨單"}</h2><span class="erp-stage-tag">${editing && editing.sourceTransactionId ? "已由庫存銷貨帶入" : "銷貨作業"}</span></div>
+      ${canEdit ? `<form id="erpSalesForm" class="erp-form">
+        <div class="erp-form-row"><label>銷貨單號<input name="orderNo" value="${value("orderNo",erpOrderNumber())}" required maxlength="40"></label><label>銷貨日期<input name="orderDate" type="date" value="${value("orderDate",todayStr())}" required></label></div>
         <div class="erp-form-row"><label>已建檔客戶<select name="customerId"><option value="">尚未選擇／使用原始客戶名稱</option>${customerOptions}</select></label><label>客戶名稱 <b>*</b><input name="customerName" value="${value("customerName")}" required maxlength="80" placeholder="可由來源自動帶入"></label></div>
-        <div class="erp-form-row"><label>稅別<select name="taxMode"><option value="no_tax"${selected("taxMode","no_tax","no_tax")}>不計稅</option><option value="tax_included"${selected("taxMode","tax_included")}>含稅</option><option value="tax_excluded"${selected("taxMode","tax_excluded")}>未稅外加</option></select></label><label>業務／經手人<input name="salesperson" value="${value("salesperson",currentUser ? currentUser.name : "")}" maxlength="50"></label></div>
-        <div class="erp-line-box"><p>品項明細</p><div class="erp-form-row"><label>品項來源<select name="itemSource"><option value="tire"${selected("itemSource","tire","tire")}>輪胎</option><option value="kyb"${selected("itemSource","kyb")}>KYB 避震器</option><option value="custom"${selected("itemSource","custom")}>其他品項</option></select></label><label>品項名稱 <b>*</b><input name="itemName" required maxlength="100" value="${value("itemName")}" placeholder="先手動輸入；下一階段串接庫存"></label></div><div class="erp-form-row erp-form-row-3"><label>數量 <b>*</b><input name="quantity" type="number" min="1" step="1" value="${value("quantity",1)}" required></label><label>單價<input name="unitPrice" type="number" min="0" step="1" value="${value("unitPrice",0)}"></label><label>金額<input name="amount" type="number" min="0" step="1" value="${value("amount",0)}"></label></div></div>
+        <div class="erp-form-row"><label>稅別<select name="taxMode"><option value="no_tax"${selected("taxMode","no_tax","no_tax")}>不計稅</option><option value="tax_included"${selected("taxMode","tax_included")}>含稅</option><option value="tax_excluded"${selected("taxMode","tax_excluded")}>未稅外加（5%）</option></select></label><label>業務／經手人<input name="salesperson" value="${value("salesperson",currentUser ? currentUser.name : "")}" maxlength="50"></label></div>
+        <div class="erp-line-box"><p>品項明細</p><div class="erp-form-row"><label>品項來源<select name="itemSource"><option value="tire"${selected("itemSource","tire","tire")}>輪胎</option><option value="kyb"${selected("itemSource","kyb")}>KYB 避震器</option><option value="custom"${selected("itemSource","custom")}>其他品項</option></select></label><label>品項名稱 <b>*</b><input name="itemName" required maxlength="100" value="${value("itemName")}" placeholder="先手動輸入；下一階段串接庫存"></label></div><div class="erp-form-row erp-form-row-3"><label>數量 <b>*</b><input name="quantity" type="number" min="1" step="1" value="${value("quantity",1)}" required></label><label>單價 <b>*</b><input name="unitPrice" type="number" min="0" step="1" value="${value("unitPrice",0)}" required></label><label>品項金額<input name="amount" type="number" readonly value="0"></label></div></div>
+        <div class="erp-tax-summary" id="erpTaxSummary"><div><span>未稅金額</span><strong id="erpSubtotalText">NT$ 0</strong></div><div><span>營業稅 <em id="erpTaxRateText">0%</em></span><strong id="erpTaxText">NT$ 0</strong></div><div class="erp-grand-total"><span>含稅總計</span><strong id="erpTotalText">NT$ 0</strong></div></div>
         <label>備註<textarea name="notes" rows="2" maxlength="300" placeholder="例如：送貨日期、特殊需求">${value("notes")}</textarea></label>
-        <div class="erp-form-actions">${editing ? '<button class="erp-secondary" type="button" id="erpCancelEditBtn">取消修改</button>' : '<button class="erp-secondary" type="button" id="erpSaveDraftBtn">儲存草稿</button>'}<button class="erp-primary" type="submit">${editing ? "儲存修改" : "送出等待確認"}</button></div>
-      </form>
+        <div class="erp-form-actions">${actionButtons}</div>
+      </form>` : '<div class="erp-confirmed-note">此銷貨單已確認，可預覽列印，並可於「月結開票」納入同一客戶的發票。</div>'}
     </section>
-    <section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">ALL SALES ORDERS</p><h2>訂單清單</h2></div><span class="erp-counter">${erpSalesOrdersCache.length} 筆</span></div>
-      ${erpSalesOrdersCache.length ? '<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>單號</th><th>客戶</th><th>品項</th><th>金額</th><th>稅別</th><th>狀態</th><th>建立時間</th><th>操作</th></tr></thead><tbody>' + erpSalesOrdersCache.map(o => '<tr><td><strong>' + erpEscape(o.orderNo) + '</strong></td><td>' + erpEscape(o.customerName) + '</td><td>' + erpEscape(o.itemName) + ' × ' + (Number(o.quantity)||0) + '</td><td>NT$ ' + erpMoney(o.amount) + '</td><td>' + ({no_tax:"不計稅",tax_included:"含稅",tax_excluded:"未稅外加"}[o.taxMode] || "-") + '</td><td>' + erpStatus(o.status) + '</td><td>' + erpDateTime(o.createdAt) + '</td><td>' + (o.status === "confirmed" ? '<span class="erp-locked">已確認</span>' : '<button class="erp-edit-btn" data-erp-edit="' + erpEscape(o.id) + '">修改</button>') + (o.status === "submitted" ? '<button class="erp-confirm-btn" data-erp-confirm="' + erpEscape(o.id) + '">確認</button>' : '') + '</td></tr>').join("") + '</tbody></table></div>' : '<div class="erp-empty">尚未建立銷貨訂單。可從「待轉銷貨」帶入原本的庫存銷貨資料。</div>'}
+    <section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">ALL SALES DOCUMENTS</p><h2>銷貨單清單</h2></div><span class="erp-counter">${erpSalesOrdersCache.length} 筆</span></div>
+      ${erpSalesOrdersCache.length ? '<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>單號</th><th>客戶</th><th>品項</th><th>未稅</th><th>稅額</th><th>總計</th><th>狀態</th><th>操作</th></tr></thead><tbody>' + erpSalesOrdersCache.map(o => { const t=erpDisplayTotals(o); return '<tr><td><strong>' + erpEscape(o.orderNo) + '</strong></td><td>' + erpEscape(o.customerName) + '</td><td>' + erpEscape(o.itemName) + ' × ' + (Number(o.quantity)||0) + '</td><td>NT$ ' + erpMoney(t.subtotal) + '</td><td>NT$ ' + erpMoney(t.taxAmount) + '</td><td><strong>NT$ ' + erpMoney(t.totalAmount) + '</strong></td><td>' + erpStatus(o.status) + (o.invoiceId ? '<br><span class="erp-invoiced-tag">已月結</span>' : '') + '</td><td>' + (o.status === "confirmed" ? '<button class="erp-print-btn" data-erp-print="' + erpEscape(o.id) + '">預覽列印</button>' : '<button class="erp-edit-btn" data-erp-edit="' + erpEscape(o.id) + '">修改</button>') + (o.status === "submitted" ? '<button class="erp-confirm-btn" data-erp-confirm="' + erpEscape(o.id) + '">確認</button>' : '') + '</td></tr>'; }).join("") + '</tbody></table></div>' : '<div class="erp-empty">尚未建立銷貨單。可從「待建立銷貨單」帶入原本的庫存銷貨資料。</div>'}
     </section>`;
   const form = document.getElementById("erpSalesForm");
   if(form){
+    const refreshTax = () => {
+      const calc = erpTotals({ quantity:form.elements.quantity.value, unitPrice:form.elements.unitPrice.value, taxMode:form.elements.taxMode.value, lineAmount:Number(form.elements.quantity.value||0)*Number(form.elements.unitPrice.value||0) });
+      form.elements.amount.value = calc.lineAmount;
+      document.getElementById("erpSubtotalText").textContent = "NT$ " + erpMoney(calc.subtotal);
+      document.getElementById("erpTaxText").textContent = "NT$ " + erpMoney(calc.taxAmount);
+      document.getElementById("erpTotalText").textContent = "NT$ " + erpMoney(calc.totalAmount);
+      document.getElementById("erpTaxRateText").textContent = calc.taxRate ? "5%" : "0%";
+    };
     form.addEventListener("submit", e => saveErpSalesOrder(e, editing ? (editing.status || "draft") : "submitted"));
-    const draftBtn = document.getElementById("erpSaveDraftBtn");
-    if(draftBtn) draftBtn.addEventListener("click", () => saveErpSalesOrder(null, "draft"));
-    const cancelBtn = document.getElementById("erpCancelEditBtn");
-    if(cancelBtn) cancelBtn.addEventListener("click", () => { erpSalesEditingId=null; renderErpSales(); });
-    form.elements.customerId.addEventListener("change", () => {
-      const c = erpCustomersCache.find(x => x.id === form.elements.customerId.value);
-      if(c) form.elements.customerName.value = c.name;
-    });
+    form.elements.quantity.addEventListener("input", refreshTax);
+    form.elements.unitPrice.addEventListener("input", refreshTax);
+    form.elements.taxMode.addEventListener("change", refreshTax);
+    form.elements.customerId.addEventListener("change", () => { const c=erpCustomersCache.find(x=>x.id===form.elements.customerId.value); if(c) form.elements.customerName.value=c.name; });
+    const draftBtn=document.getElementById("erpSaveDraftBtn"); if(draftBtn) draftBtn.addEventListener("click",()=>saveErpSalesOrder(null,"draft"));
+    const submitBtn=document.getElementById("erpSubmitSalesBtn"); if(submitBtn) submitBtn.addEventListener("click",()=>saveErpSalesOrder(null,"submitted"));
+    const cancelBtn=document.getElementById("erpCancelEditBtn"); if(cancelBtn) cancelBtn.addEventListener("click",()=>{erpSalesEditingId=null;renderErpSales();});
+    refreshTax();
   }
-  el.querySelectorAll("[data-erp-edit]").forEach(btn => btn.addEventListener("click", () => { erpSalesEditingId = btn.dataset.erpEdit; renderErpSales(); window.scrollTo({top:0,behavior:"smooth"}); }));
-  el.querySelectorAll("[data-erp-confirm]").forEach(btn => btn.addEventListener("click", () => confirmErpSalesOrder(btn.dataset.erpConfirm)));
+  el.querySelectorAll("[data-erp-edit]").forEach(btn=>btn.addEventListener("click",()=>{erpSalesEditingId=btn.dataset.erpEdit;renderErpSales();window.scrollTo({top:0,behavior:"smooth"});}));
+  el.querySelectorAll("[data-erp-confirm]").forEach(btn=>btn.addEventListener("click",()=>confirmErpSalesOrder(btn.dataset.erpConfirm)));
+  el.querySelectorAll("[data-erp-print]").forEach(btn=>btn.addEventListener("click",()=>{const o=erpSalesOrdersCache.find(x=>x.id===btn.dataset.erpPrint);if(o) openErpPrintPreview(o);}));
 }
 
 async function saveErpSalesOrder(event, status){
   if(event) event.preventDefault();
-  const form = document.getElementById("erpSalesForm");
+  const form=document.getElementById("erpSalesForm");
   if(!form.reportValidity()) return;
-  const matchedCustomer = erpCustomersCache.find(c => c.id === form.elements.customerId.value);
-  const submitBtn = form.querySelector("button[type=submit]");
-  submitBtn.disabled = true;
-  const data = {
-    orderNo:form.elements.orderNo.value.trim(), orderDate:form.elements.orderDate.value,
-    customerId:matchedCustomer ? matchedCustomer.id : null, customerName:form.elements.customerName.value.trim(),
-    taxMode:form.elements.taxMode.value, salesperson:form.elements.salesperson.value.trim(),
-    itemSource:form.elements.itemSource.value, itemName:form.elements.itemName.value.trim(),
-    quantity:Number(form.elements.quantity.value)||0, unitPrice:Number(form.elements.unitPrice.value)||0,
-    amount:Number(form.elements.amount.value)||0, notes:form.elements.notes.value.trim(),
-    updatedAt:firebase.firestore.FieldValue.serverTimestamp(), updatedByUid:currentUser.uid, updatedByName:currentUser.name
+  const matchedCustomer=erpCustomersCache.find(c=>c.id===form.elements.customerId.value);
+  const calc=erpTotals({quantity:form.elements.quantity.value,unitPrice:form.elements.unitPrice.value,taxMode:form.elements.taxMode.value,lineAmount:Number(form.elements.quantity.value||0)*Number(form.elements.unitPrice.value||0)});
+  const submitBtn=event ? form.querySelector("button[type=submit]") : (status==="draft"?document.getElementById("erpSaveDraftBtn"):document.getElementById("erpSubmitSalesBtn"));
+  if(submitBtn) submitBtn.disabled=true;
+  const data={
+    orderNo:form.elements.orderNo.value.trim(),orderDate:form.elements.orderDate.value,
+    customerId:matchedCustomer?matchedCustomer.id:null,customerName:form.elements.customerName.value.trim(),
+    taxMode:form.elements.taxMode.value,salesperson:form.elements.salesperson.value.trim(),
+    itemSource:form.elements.itemSource.value,itemName:form.elements.itemName.value.trim(),
+    quantity:Number(form.elements.quantity.value)||0,unitPrice:Number(form.elements.unitPrice.value)||0,
+    amount:calc.lineAmount,lineAmount:calc.lineAmount,subtotalAmount:calc.subtotal,taxAmount:calc.taxAmount,totalAmount:calc.totalAmount,taxRate:calc.taxRate,
+    notes:form.elements.notes.value.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedByUid:currentUser.uid,updatedByName:currentUser.name
   };
   try{
-    if(erpSalesEditingId){
-      await db.collection("erpSalesOrders").doc(erpSalesEditingId).update(data);
-      erpSalesEditingId = null;
-    }else{
-      data.status=status; data.createdAt=firebase.firestore.FieldValue.serverTimestamp();
-      data.createdByUid=currentUser.uid; data.createdByName=currentUser.name;
-      await db.collection("erpSalesOrders").add(data);
-      form.reset();
-    }
-  }catch(err){
-    console.error(err); alert("銷貨單儲存失敗，請稍後再試。");
-  }finally{ submitBtn.disabled=false; }
+    if(erpSalesEditingId){ await db.collection("erpSalesOrders").doc(erpSalesEditingId).update({...data,status}); erpSalesEditingId=null; }
+    else{ data.status=status;data.createdAt=firebase.firestore.FieldValue.serverTimestamp();data.createdByUid=currentUser.uid;data.createdByName=currentUser.name;await db.collection("erpSalesOrders").add(data);form.reset(); }
+  }catch(err){console.error(err);alert("銷貨單儲存失敗，請稍後再試。");}
+  finally{if(submitBtn)submitBtn.disabled=false;}
 }
 
 async function confirmErpSalesOrder(id){
@@ -363,3 +410,92 @@ async function importErpSourceSale(source){
   }
 }
 
+
+
+// ============================================================
+// 月結開票與銷貨單預覽列印
+// ============================================================
+function erpDefaultInvoiceRange(){
+  const now=new Date(), first=new Date(now.getFullYear(),now.getMonth(),1);
+  return {from:first.toISOString().slice(0,10),to:todayStr()};
+}
+function erpInvoiceCandidates(){
+  return erpSalesOrdersCache.filter(o=>o.status==="confirmed"&&!o.invoiceId);
+}
+function erpInvoiceTotal(orders){
+  return orders.reduce((sum,o)=>{const t=erpDisplayTotals(o);sum.subtotal+=t.subtotal;sum.taxAmount+=t.taxAmount;sum.totalAmount+=t.totalAmount;return sum;},{subtotal:0,taxAmount:0,totalAmount:0});
+}
+function erpInvoiceNumber(){
+  const d=new Date(), two=n=>String(n).padStart(2,"0");
+  return "INV-"+d.getFullYear()+two(d.getMonth()+1)+two(d.getDate())+"-"+two(d.getHours())+two(d.getMinutes())+two(d.getSeconds());
+}
+function renderErpInvoices(){
+  const el=document.getElementById("erp-page-invoices");
+  if(!el) return;
+  const range=erpDefaultInvoiceRange();
+  if(!erpInvoiceFilter.from) erpInvoiceFilter.from=range.from;
+  if(!erpInvoiceFilter.to) erpInvoiceFilter.to=range.to;
+  const candidates=erpInvoiceCandidates();
+  const customerNames=[...new Set(candidates.map(o=>o.customerName||"未指定客戶"))].sort((a,b)=>a.localeCompare(b,"zh-Hant"));
+  const filtered=candidates.filter(o=>(!erpInvoiceFilter.customerName||(o.customerName||"未指定客戶")===erpInvoiceFilter.customerName)&&(!erpInvoiceFilter.from||o.orderDate>=erpInvoiceFilter.from)&&(!erpInvoiceFilter.to||o.orderDate<=erpInvoiceFilter.to));
+  el.innerHTML=`
+    <div class="erp-page-heading"><div><p class="erp-kicker">MONTHLY INVOICING</p><h1>月結開票</h1><p>選擇同一客戶、同一結帳期間的已確認銷貨單，合併建立一筆月結發票。</p></div></div>
+    <section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">SELECT SALES DOCUMENTS</p><h2>選取本期銷貨單</h2></div><span class="erp-counter">${filtered.length} 筆可開票</span></div>
+      <div class="erp-invoice-filters"><label>客戶<select id="erpInvoiceCustomer"><option value="">請選擇客戶</option>${customerNames.map(n=>'<option value="'+erpEscape(n)+'"'+(erpInvoiceFilter.customerName===n?" selected":"")+">"+erpEscape(n)+"</option>").join("")}</select></label><label>銷貨日期起<input type="date" id="erpInvoiceFrom" value="${erpEscape(erpInvoiceFilter.from)}"></label><label>銷貨日期迄<input type="date" id="erpInvoiceTo" value="${erpEscape(erpInvoiceFilter.to)}"></label><button class="erp-secondary" id="erpInvoiceFilterBtn">套用篩選</button></div>
+      ${erpInvoiceFilter.customerName&&filtered.length?'<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th><input type="checkbox" id="erpInvoiceSelectAll"></th><th>銷貨日期</th><th>銷貨單號</th><th>品項</th><th>未稅</th><th>稅額</th><th>總計</th><th>稅別</th></tr></thead><tbody>'+filtered.map(o=>{const t=erpDisplayTotals(o);return '<tr><td><input type="checkbox" data-invoice-sale="'+erpEscape(o.id)+'"></td><td>'+erpEscape(o.orderDate||"-")+'</td><td><strong>'+erpEscape(o.orderNo)+'</strong></td><td>'+erpEscape(o.itemName)+' × '+(Number(o.quantity)||0)+'</td><td>NT$ '+erpMoney(t.subtotal)+'</td><td>NT$ '+erpMoney(t.taxAmount)+'</td><td>NT$ '+erpMoney(t.totalAmount)+'</td><td>'+erpTaxLabel(o.taxMode)+'</td></tr>';}).join("")+'</tbody></table></div><div class="erp-invoice-total" id="erpInvoiceTotal"><span>請勾選銷貨單以計算本次月結金額。</span></div><div class="erp-form-actions"><button class="erp-primary" id="erpCreateInvoiceBtn">建立月結發票</button></div>':(erpInvoiceFilter.customerName?'<div class="erp-empty">此客戶在選定期間沒有尚未開票的已確認銷貨單。</div>':'<div class="erp-empty"><strong>請先選擇客戶。</strong><br>系統只會將同一個客戶的銷貨單合併開票，避免帳務混在一起。</div>')}
+    </section>
+    <section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">INVOICE HISTORY</p><h2>已建立的月結發票</h2></div><span class="erp-counter">${erpInvoicesCache.length} 筆</span></div>
+      ${erpInvoicesCache.length?'<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>發票編號</th><th>客戶</th><th>開票日期</th><th>銷貨單數</th><th>未稅</th><th>稅額</th><th>總計</th><th></th></tr></thead><tbody>'+erpInvoicesCache.map(inv=>'<tr><td><strong>'+erpEscape(inv.invoiceNo)+'</strong></td><td>'+erpEscape(inv.customerName)+'</td><td>'+erpEscape(inv.invoiceDate||"-")+'</td><td>'+((inv.saleOrderIds||[]).length)+' 筆</td><td>NT$ '+erpMoney(inv.subtotalAmount)+'</td><td>NT$ '+erpMoney(inv.taxAmount)+'</td><td><strong>NT$ '+erpMoney(inv.totalAmount)+'</strong></td><td><button class="erp-print-btn" data-erp-print-invoice="'+erpEscape(inv.id)+'">預覽列印</button></td></tr>').join("")+'</tbody></table></div>':'<div class="erp-empty">尚未建立月結發票。</div>'}
+    </section>`;
+  document.getElementById("erpInvoiceFilterBtn").addEventListener("click",()=>{
+    erpInvoiceFilter={customerName:document.getElementById("erpInvoiceCustomer").value,from:document.getElementById("erpInvoiceFrom").value,to:document.getElementById("erpInvoiceTo").value};renderErpInvoices();
+  });
+  const checkboxes=[...el.querySelectorAll("[data-invoice-sale]")];
+  const updateTotal=()=>{
+    const picked=checkboxes.filter(x=>x.checked).map(x=>erpSalesOrdersCache.find(o=>o.id===x.dataset.invoiceSale)).filter(Boolean);
+    const t=erpInvoiceTotal(picked), box=document.getElementById("erpInvoiceTotal");
+    if(box) box.innerHTML='<div><span>本次合併銷貨單</span><strong>'+picked.length+' 筆</strong></div><div><span>未稅金額</span><strong>NT$ '+erpMoney(t.subtotal)+'</strong></div><div><span>營業稅 5%</span><strong>NT$ '+erpMoney(t.taxAmount)+'</strong></div><div class="erp-grand-total"><span>含稅總計</span><strong>NT$ '+erpMoney(t.totalAmount)+'</strong></div>';
+  };
+  const all=document.getElementById("erpInvoiceSelectAll");if(all)all.addEventListener("change",()=>{checkboxes.forEach(x=>x.checked=all.checked);updateTotal();});
+  checkboxes.forEach(x=>x.addEventListener("change",updateTotal));
+  const create=document.getElementById("erpCreateInvoiceBtn");if(create)create.addEventListener("click",createErpInvoice);
+  el.querySelectorAll("[data-erp-print-invoice]").forEach(btn=>btn.addEventListener("click",()=>{const inv=erpInvoicesCache.find(x=>x.id===btn.dataset.erpPrintInvoice);if(inv)openErpPrintPreview(null,inv);}));
+}
+async function createErpInvoice(){
+  const checked=[...document.querySelectorAll("[data-invoice-sale]:checked")];
+  const selected=checked.map(x=>erpSalesOrdersCache.find(o=>o.id===x.dataset.invoiceSale)).filter(Boolean);
+  if(!selected.length)return alert("請至少選擇一筆銷貨單。");
+  const customerName=erpInvoiceFilter.customerName;
+  if(!customerName||selected.some(o=>(o.customerName||"未指定客戶")!==customerName))return alert("月結發票只能合併同一位客戶的銷貨單。");
+  if(selected.some(o=>o.status!=="confirmed"||o.invoiceId))return alert("選取內容已變更，請重新整理後再試。");
+  const totals=erpInvoiceTotal(selected);
+  if(!confirm("建立「"+customerName+"」的月結發票？\n共 "+selected.length+" 筆銷貨單，含稅總計 NT$ "+erpMoney(totals.totalAmount)+"。\n建立後將無法再次納入其他月結發票。"))return;
+  const ref=db.collection("erpInvoices").doc();
+  const invoiceNo=erpInvoiceNumber();
+  const customer=erpCustomersCache.find(c=>(c.name||"")===customerName);
+  const lines=selected.map(o=>{const t=erpDisplayTotals(o);return {saleOrderId:o.id,orderNo:o.orderNo,orderDate:o.orderDate,itemName:o.itemName,quantity:Number(o.quantity)||0,unitPrice:Number(o.unitPrice)||0,taxMode:o.taxMode||"no_tax",subtotalAmount:t.subtotal,taxAmount:t.taxAmount,totalAmount:t.totalAmount};});
+  const batch=db.batch();
+  batch.set(ref,{invoiceNo,invoiceDate:todayStr(),customerId:customer?customer.id:null,customerName,periodFrom:erpInvoiceFilter.from,periodTo:erpInvoiceFilter.to,saleOrderIds:selected.map(o=>o.id),lines,subtotalAmount:totals.subtotal,taxAmount:totals.taxAmount,totalAmount:totals.totalAmount,taxRate:0.05,status:"issued",createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});
+  selected.forEach(o=>batch.update(db.collection("erpSalesOrders").doc(o.id),{invoiceId:ref.id,invoiceNo, invoicedAt:firebase.firestore.FieldValue.serverTimestamp()}));
+  try{await batch.commit();alert("月結發票已建立。你現在可以在下方的「已建立的月結發票」預覽列印。");}
+  catch(err){console.error(err);alert("建立月結發票失敗。請確認 Firebase Rules 已加入 erpInvoices 權限後再試。");}
+}
+function erpPrintRows(lines){
+  return lines.map((l,i)=>'<tr><td>'+String(i+1).padStart(2,"0")+'</td><td>'+erpEscape(l.itemName||"-")+'</td><td class="num">'+(Number(l.quantity)||0)+'</td><td class="num">'+erpMoney(l.unitPrice)+'</td><td class="num">'+erpMoney(l.subtotalAmount!=null?l.subtotalAmount:erpDisplayTotals(l).subtotal)+'</td></tr>').join("");
+}
+function openErpPrintPreview(order,invoice){
+  const old=document.getElementById("erpPrintOverlay");if(old)old.remove();
+  const isInvoice=!!invoice;
+  const customerName=isInvoice?invoice.customerName:order.customerName;
+  const customer=erpCustomersCache.find(c=>(isInvoice?invoice.customerId:order.customerId)&&c.id===(isInvoice?invoice.customerId:order.customerId));
+  const lines=isInvoice?invoice.lines||[]:[{itemName:order.itemName,quantity:order.quantity,unitPrice:order.unitPrice,subtotalAmount:erpDisplayTotals(order).subtotal}];
+  const totals=isInvoice?{subtotal:Number(invoice.subtotalAmount)||0,taxAmount:Number(invoice.taxAmount)||0,totalAmount:Number(invoice.totalAmount)||0}:erpDisplayTotals(order);
+  const docNo=isInvoice?invoice.invoiceNo:order.orderNo;
+  const docDate=isInvoice?invoice.invoiceDate:order.orderDate;
+  const overlay=document.createElement("div");
+  overlay.id="erpPrintOverlay";overlay.className="erp-print-overlay";
+  overlay.innerHTML='<div class="erp-print-actions"><button class="erp-secondary" id="erpClosePrint">關閉預覽</button><button class="erp-primary" id="erpDoPrint">列印</button></div><article class="erp-print-paper"><header><div><p>ERP SYSTEM DESIGN</p><h1>'+ (isInvoice?"月結銷貨明細／發票預覽":"銷貨單") +'</h1></div><div class="erp-print-docno"><span>單據編號</span><strong>'+erpEscape(docNo)+'</strong></div></header><section class="erp-print-info"><div><span>客戶名稱</span><strong>'+erpEscape(customerName||"未指定客戶")+'</strong></div><div><span>銷貨／開票日期</span><strong>'+erpEscape(docDate||"-")+'</strong></div><div><span>聯絡電話</span><strong>'+erpEscape(customer&&customer.phone||"")+'</strong></div><div><span>統一編號</span><strong>'+erpEscape(customer&&customer.taxId||"")+'</strong></div></section>' +(isInvoice?'<p class="erp-print-period">結帳期間：'+erpEscape(invoice.periodFrom||"-")+" ～ "+erpEscape(invoice.periodTo||"-")+'</p>':'')+'<table class="erp-print-table"><thead><tr><th>項次</th><th>品名／規格</th><th>數量</th><th>單價</th><th>小計</th></tr></thead><tbody>'+erpPrintRows(lines)+'</tbody></table><section class="erp-print-bottom"><div class="erp-print-notes"><span>備註</span><p>'+erpEscape(isInvoice?"本單彙整同一客戶本期已確認銷貨單。":order.notes||"")+'</p></div><div class="erp-print-totals"><div><span>未稅金額</span><strong>NT$ '+erpMoney(totals.subtotal)+'</strong></div><div><span>營業稅（5%）</span><strong>NT$ '+erpMoney(totals.taxAmount)+'</strong></div><div class="total"><span>含稅總計</span><strong>NT$ '+erpMoney(totals.totalAmount)+'</strong></div></div></section><footer><span>經手人：'+erpEscape(isInvoice?(invoice.createdByName||""):(order.salesperson||order.createdByName||""))+'</span><span>此為系統列印預覽單據</span></footer></article>';
+  document.body.appendChild(overlay);
+  document.getElementById("erpClosePrint").addEventListener("click",()=>overlay.remove());
+  document.getElementById("erpDoPrint").addEventListener("click",()=>window.print());
+}
