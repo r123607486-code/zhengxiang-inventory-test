@@ -204,7 +204,7 @@ function switchToCategory(cat){
   document.getElementById("categoryScreen").classList.add("hidden");
   document.getElementById("app").classList.remove("hidden");
   document.getElementById("appTitle").textContent =
-    "正享庫存管理系統｜" + (currentCategory === "kyb" ? "KYB避震器" : "輪胎");
+    "ERP System Design｜商品與庫存 · " + (currentCategory === "kyb" ? "避震器庫存" : "輪胎庫存");
   buildTabs();
   checkFridayBanner();
   startListeners();
@@ -220,23 +220,23 @@ document.getElementById("switchCategoryBtn").addEventListener("click", ()=>{
 
 const TIRE_TAB_DEFS = [
   {id:"query",    label:"庫存查詢", icon:ICONS.query,   roles:["admin","member"]},
-  {id:"myorders", label:"我的訂單", icon:ICONS.myorders,roles:["member"]},
-  {id:"master",   label:"庫存總表", icon:ICONS.master,  roles:["admin","member"]},
-  {id:"txn",      label:"進銷貨管理", icon:ICONS.txn,   roles:["admin","member"]},
-  {id:"orders",   label:"訂單管理", icon:ICONS.orders,  roles:["admin"]},
-  {id:"loc",      label:"儲位管理", icon:ICONS.loc,     roles:["admin"]},
-  {id:"import",   label:"資料匯入", icon:ICONS.txn,     roles:["admin"]},
-  {id:"users",    label:"使用者管理", icon:ICONS.users, roles:["admin"]},
+  {id:"myorders", label:"我的叫貨申請", icon:ICONS.myorders,roles:["member"]},
+  {id:"master",   label:"庫存明細", icon:ICONS.master,  roles:["admin","member"]},
+  {id:"txn",      label:"庫存異動", icon:ICONS.txn,   roles:["admin","member"]},
+  {id:"orders",   label:"庫存叫貨申請", icon:ICONS.orders,  roles:["admin"]},
+  {id:"loc",      label:"倉儲儲位", icon:ICONS.loc,     roles:["admin"]},
+  {id:"import",   label:"資料移轉與備份", icon:ICONS.txn,     roles:["admin"]},
+  {id:"users",    label:"帳號與權限", icon:ICONS.users, roles:["admin"]},
 ];
 const KYB_TAB_DEFS = [
   {id:"kyb-query",    label:"庫存查詢", icon:ICONS.query,   roles:["admin","member"]},
-  {id:"kyb-myorders", label:"我的訂單", icon:ICONS.myorders,roles:["member"]},
-  {id:"kyb-master",   label:"庫存總表", icon:ICONS.master,  roles:["admin","member"]},
-  {id:"kyb-txn",      label:"進銷貨管理", icon:ICONS.txn,   roles:["admin","member"]},
-  {id:"kyb-orders",   label:"訂單管理", icon:ICONS.orders,  roles:["admin"]},
-  {id:"kyb-loc",      label:"儲位管理", icon:ICONS.loc,     roles:["admin"]},
-  {id:"kyb-import",   label:"資料匯入", icon:ICONS.txn,     roles:["admin"]},
-  {id:"users",        label:"使用者管理", icon:ICONS.users, roles:["admin"]},
+  {id:"kyb-myorders", label:"我的叫貨申請", icon:ICONS.myorders,roles:["member"]},
+  {id:"kyb-master",   label:"庫存明細", icon:ICONS.master,  roles:["admin","member"]},
+  {id:"kyb-txn",      label:"庫存異動", icon:ICONS.txn,   roles:["admin","member"]},
+  {id:"kyb-orders",   label:"庫存叫貨申請", icon:ICONS.orders,  roles:["admin"]},
+  {id:"kyb-loc",      label:"倉儲儲位", icon:ICONS.loc,     roles:["admin"]},
+  {id:"kyb-import",   label:"資料移轉與備份", icon:ICONS.txn,     roles:["admin"]},
+  {id:"users",        label:"帳號與權限", icon:ICONS.users, roles:["admin"]},
 ];
 function currentTabDefs(){ return currentCategory === "kyb" ? KYB_TAB_DEFS : TIRE_TAB_DEFS; }
 

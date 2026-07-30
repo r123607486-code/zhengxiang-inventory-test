@@ -72,16 +72,16 @@ function buildErpWorkspace(){
     <header class="erp-topbar">
       <div class="erp-brand">
         <span class="erp-brand-mark">${ERP_ICONS.dashboard}</span>
-        <div><strong>ERP 管理中心</strong><small>銷貨與帳務作業平台</small></div>
+        <div><strong>ERP System Design</strong><small>銷售與帳務作業平台</small></div>
       </div>
       <div class="erp-user"><span id="erpWhoLabel"></span><button class="erp-quiet-btn" id="erpBackBtn">${ERP_ICONS.back} 回品項選單</button></div>
     </header>
     <div class="erp-layout">
       <aside class="erp-sidebar">
-        <button class="erp-nav active" data-erp-view="dashboard">${ERP_ICONS.dashboard}<span>總覽</span></button>
+        <button class="erp-nav active" data-erp-view="dashboard">${ERP_ICONS.dashboard}<span>營運總覽</span></button>
         <button class="erp-nav" data-erp-view="customers">${ERP_ICONS.customers}<span>客戶管理</span></button>
-        <button class="erp-nav" data-erp-view="sales">${ERP_ICONS.sales}<span>銷貨訂單</span></button>
-        <button class="erp-nav" data-erp-view="transfers">${ERP_ICONS.transfer}<span>待轉銷貨</span></button>
+        <button class="erp-nav" data-erp-view="sales">${ERP_ICONS.sales}<span>銷貨單</span></button>
+        <button class="erp-nav" data-erp-view="transfers">${ERP_ICONS.transfer}<span>待建立銷貨單</span></button>
         <div class="erp-sidebar-note">第一階段<br>不重複扣庫存・不產生應收</div>
       </aside>
       <main class="erp-main">
@@ -225,7 +225,7 @@ function renderErpSales(){
   const value = (field, fallback="") => erpEscape(editing && editing[field] != null ? editing[field] : fallback);
   const selected = (field, option, fallback) => ((editing && editing[field] === option) || (!editing && fallback === option)) ? " selected" : "";
   el.innerHTML = `
-    <div class="erp-page-heading"><div><p class="erp-kicker">SALES ORDER</p><h1>銷貨訂單</h1><p>來源銷貨帶入後，僅在此補齊帳務資料；不會再次扣庫存。</p></div></div>
+    <div class="erp-page-heading"><div><p class="erp-kicker">SALES DOCUMENTS</p><h1>銷貨單</h1><p>來源銷貨帶入後，僅在此補齊帳務資料；不會再次扣庫存。</p></div></div>
     <section class="erp-panel erp-form-panel"><div class="erp-panel-title"><h2>${editing ? "修改銷貨訂單" : "建立銷貨訂單"}</h2><span class="erp-stage-tag">${editing && editing.sourceTransactionId ? "已由庫存銷貨帶入" : "第一階段"}</span></div>
       <form id="erpSalesForm" class="erp-form">
         <div class="erp-form-row"><label>銷貨單號<input name="orderNo" value="${value("orderNo",erpOrderNumber())}" required maxlength="40"></label><label>訂單日期<input name="orderDate" type="date" value="${value("orderDate",todayStr())}" required></label></div>
@@ -327,7 +327,7 @@ function renderErpTransfers(){
   const linked = new Map(erpSalesOrdersCache.filter(o => o.sourceTransactionId).map(o => [o.sourceType + ":" + o.sourceTransactionId,o]));
   const outstanding = sources.filter(s => !linked.has(s.key));
   el.innerHTML = `
-    <div class="erp-page-heading"><div><p class="erp-kicker">IMPORT FROM INVENTORY SALES</p><h1>待轉銷貨</h1><p>所有輪胎與 KYB 銷貨都集中在此。帶入後只補帳務資料，不影響既有庫存。</p></div></div>
+    <div class="erp-page-heading"><div><p class="erp-kicker">IMPORT FROM INVENTORY SALES</p><h1>待建立銷貨單</h1><p>所有輪胎與 KYB 銷貨都集中在此。帶入後只補帳務資料，不影響既有庫存。</p></div></div>
     <div class="erp-transfer-summary"><article><strong>${sources.length}</strong><span>全部來源銷貨</span></article><article><strong>${outstanding.length}</strong><span>尚未帶入 ERP</span></article><article><strong>${sources.length-outstanding.length}</strong><span>已建立 ERP 銷貨單</span></article></div>
     <section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">UNLINKED SALES</p><h2>尚未帶入的銷貨</h2></div><span class="erp-counter">${outstanding.length} 筆</span></div>
       ${outstanding.length ? '<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>日期</th><th>來源</th><th>品項</th><th>數量</th><th>客戶</th><th>業務</th><th></th></tr></thead><tbody>' + outstanding.map(s => '<tr><td>' + erpEscape(s.date || "-") + '</td><td><span class="erp-source-tag ' + s.sourceType + '">' + (s.sourceType === "tire" ? "輪胎" : "KYB") + '</span></td><td><strong>' + erpEscape(s.itemName) + '</strong></td><td>' + s.quantity + '</td><td>' + erpEscape(s.customerName || "未填寫") + '</td><td>' + erpEscape(s.salesperson || "-") + '</td><td><button class="erp-primary erp-transfer-btn" data-erp-transfer="' + erpEscape(s.key) + '">帶入 ERP</button></td></tr>').join("") + '</tbody></table></div>' : '<div class="erp-empty"><strong>目前沒有待轉銷貨。</strong><br>新建立的輪胎或 KYB 銷貨會自動出現在這裡。</div>'}
