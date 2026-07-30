@@ -208,7 +208,7 @@ const TIRE_TAB_DEFS = [
   {id:"query",    label:"庫存查詢", icon:ICONS.query,   roles:["admin","member"]},
   {id:"myorders", label:"我的訂單", icon:ICONS.myorders,roles:["member"]},
   {id:"master",   label:"庫存總表", icon:ICONS.master,  roles:["admin","member"]},
-  {id:"txn",      label:"進銷貨管理", icon:ICONS.txn,   roles:["admin"]},
+  {id:"txn",      label:"進銷貨管理", icon:ICONS.txn,   roles:["admin","member"]},
   {id:"orders",   label:"訂單管理", icon:ICONS.orders,  roles:["admin"]},
   {id:"loc",      label:"儲位管理", icon:ICONS.loc,     roles:["admin"]},
   {id:"import",   label:"資料匯入", icon:ICONS.txn,     roles:["admin"]},
@@ -218,7 +218,7 @@ const KYB_TAB_DEFS = [
   {id:"kyb-query",    label:"庫存查詢", icon:ICONS.query,   roles:["admin","member"]},
   {id:"kyb-myorders", label:"我的訂單", icon:ICONS.myorders,roles:["member"]},
   {id:"kyb-master",   label:"庫存總表", icon:ICONS.master,  roles:["admin","member"]},
-  {id:"kyb-txn",      label:"進銷貨管理", icon:ICONS.txn,   roles:["admin"]},
+  {id:"kyb-txn",      label:"進銷貨管理", icon:ICONS.txn,   roles:["admin","member"]},
   {id:"kyb-orders",   label:"訂單管理", icon:ICONS.orders,  roles:["admin"]},
   {id:"kyb-loc",      label:"儲位管理", icon:ICONS.loc,     roles:["admin"]},
   {id:"kyb-import",   label:"資料匯入", icon:ICONS.txn,     roles:["admin"]},
@@ -287,29 +287,68 @@ function startListeners(){
   }
 }
 
+function startRealtimeListener(makeQuery, onData, label){
+  const subscribe = ()=>{
+    makeQuery().onSnapshot(onData, error=>{
+      console.error("[" + label + "] 即時同步失敗：", error);
+      window.setTimeout(subscribe, 3000);
+    });
+  };
+  subscribe();
+}
+
+async function refreshTireViews(){
+  const [itemsSnap, txnsSnap] = await Promise.all([
+    db.collection("items").get(),
+    db.collection("transactions").orderBy("date","desc").limit(200).get()
+  ]);
+  itemsCache = itemsSnap.docs.map(d=>({id:d.id, ...d.data()}));
+  txnCache = txnsSnap.docs.map(d=>({id:d.id, ...d.data()}));
+  renderQuery(); renderMaster(); renderTxns();
+}
+
+async function refreshKybViews(){
+  const [itemsSnap, txnsSnap] = await Promise.all([
+    db.collection("kybItems").get(),
+    db.collection("kybTransactions").orderBy("date","desc").limit(200).get()
+  ]);
+  kybItemsCache = itemsSnap.docs.map(d=>({id:d.id, ...d.data()}));
+  kybTxnCache = txnsSnap.docs.map(d=>({id:d.id, ...d.data()}));
+  renderKybQuery(); renderKybMaster(); renderKybTxns();
+}
 function startTireListeners(){
-  db.collection("items").onSnapshot(snap=>{
+  startRealtimeListener(()=>db.collection("items"), snap=>{
     itemsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
     renderQuery(); renderMaster();
-  });
-  db.collection("locations").onSnapshot(snap=>{
+  }, "tire items");
+  startRealtimeListener(()=>db.collection("locations"), snap=>{
     locationsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
     renderLocations();
-  });
+  }, "tire locations");
+  startRealtimeListener(()=>db.collection("transactions").orderBy("date","desc").limit(200), snap=>{
+    txnCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    renderTxns();
+  }, "tire transactions");
   if(currentUser.role === "admin"){
-    db.collection("transactions").orderBy("date","desc").limit(200).onSnapshot(snap=>{
-      txnCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-      renderTxns();
-    });
     db.collection("orders").where("status","==","pending").onSnapshot(snap=>{
       ordersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
       renderOrders();
       updateOrdersBadge();
     });
   } else {
-    db.collection("orders").where("requestedByUid","==",currentUser.uid).onSnapshot(snap=>{
-      myOrdersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    let myOrdersByUid = [], myOrdersByName = [];
+    const refreshMyOrders = ()=>{
+      const merged = new Map([...myOrdersByName, ...myOrdersByUid].map(o=>[o.id, o]));
+      myOrdersCache = [...merged.values()];
       renderMyOrders();
+    };
+    db.collection("orders").where("requestedByUid","==",currentUser.uid).onSnapshot(snap=>{
+      myOrdersByUid = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      refreshMyOrders();
+    });
+    db.collection("orders").where("requestedByName","==",currentUser.name).onSnapshot(snap=>{
+      myOrdersByName = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      refreshMyOrders();
     });
   }
   db.collection("brands").onSnapshot(snap=>{
@@ -319,28 +358,38 @@ function startTireListeners(){
 }
 
 function startKybListeners(){
-  db.collection("kybItems").onSnapshot(snap=>{
+  startRealtimeListener(()=>db.collection("kybItems"), snap=>{
     kybItemsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
     renderKybQuery(); renderKybMaster();
-  });
-  db.collection("kybLocations").onSnapshot(snap=>{
+  }, "kyb items");
+  startRealtimeListener(()=>db.collection("kybLocations"), snap=>{
     kybLocationsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
     renderKybLocations();
-  });
+  }, "kyb locations");
+  startRealtimeListener(()=>db.collection("kybTransactions").orderBy("date","desc").limit(200), snap=>{
+    kybTxnCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    renderKybTxns();
+  }, "kyb transactions");
   if(currentUser.role === "admin"){
-    db.collection("kybTransactions").orderBy("date","desc").limit(200).onSnapshot(snap=>{
-      kybTxnCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-      renderKybTxns();
-    });
     db.collection("kybOrders").where("status","==","pending").onSnapshot(snap=>{
       kybOrdersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
       renderKybOrders();
       updateKybOrdersBadge();
     });
   } else {
-    db.collection("kybOrders").where("requestedByUid","==",currentUser.uid).onSnapshot(snap=>{
-      kybMyOrdersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    let myKybOrdersByUid = [], myKybOrdersByName = [];
+    const refreshMyKybOrders = ()=>{
+      const merged = new Map([...myKybOrdersByName, ...myKybOrdersByUid].map(o=>[o.id, o]));
+      kybMyOrdersCache = [...merged.values()];
       renderKybMyOrders();
+    };
+    db.collection("kybOrders").where("requestedByUid","==",currentUser.uid).onSnapshot(snap=>{
+      myKybOrdersByUid = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      refreshMyKybOrders();
+    });
+    db.collection("kybOrders").where("requestedByName","==",currentUser.name).onSnapshot(snap=>{
+      myKybOrdersByName = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      refreshMyKybOrders();
     });
   }
 }

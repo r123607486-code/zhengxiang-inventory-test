@@ -110,7 +110,7 @@ function openKybTxnModal(){
     }));
   });
 
-  document.getElementById("kybTxnSubmitBtn").addEventListener("click", ()=>{
+  document.getElementById("kybTxnSubmitBtn").addEventListener("click", async ()=>{
     if(!selectedItemId){ alert("請先搜尋並選擇一個車型"); return; }
     const type = document.getElementById("kybTxnType").value;
     const qty = Number(document.getElementById("kybTxnQty").value);
@@ -127,7 +127,12 @@ function openKybTxnModal(){
       loc = document.getElementById("kybTxnLoc").value;
       if(!loc){ alert("請選擇儲位"); return; }
     }
-    submitKybTxn(selectedItemId, type, qty, loc);
+    try{
+      await submitKybTxn(selectedItemId, type, qty, loc);
+    }catch(e){
+      console.error("KYB 進銷貨送出失敗：", e);
+      alert("送出失敗：" + (e.message || "資料庫拒絕寫入。請聯絡管理者確認 Firebase 權限。"));
+    }
   });
 }
 
@@ -145,6 +150,7 @@ async function submitKybTxn(itemId, type, qty, loc){
     itemId, type, qty, loc, date: todayStr(), operator: currentUser.name, editLog: [],
     createdAt: new Date().toISOString()
   });
+  await refreshKybViews();
   closeModal();
 }
 
@@ -223,6 +229,7 @@ async function saveEditKybTxn(t, next){
       time: new Date().toISOString(), by: currentUser.name
     })
   });
+  await refreshKybViews();
 }
 
 async function deleteKybTxn(txnId){
@@ -240,6 +247,7 @@ async function deleteKybTxn(txnId){
     await itemRef.update({locations: allLocs});
   }
   await db.collection("kybTransactions").doc(txnId).delete();
+  await refreshKybViews();
 }
 
 function openNewKybItemModal(){
