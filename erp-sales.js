@@ -134,6 +134,13 @@ function renderErpSales(){
     +'<section class="erp-panel erp-form-panel">'+formHtml+'</section>'
     +'<section class="erp-panel"><div class="erp-panel-title"><h2>銷貨單清單</h2><span class="erp-counter">'+erpSalesOrdersCache.length+' 筆</span></div>'
     +(erpSalesOrdersCache.length?'<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>單號</th><th>客戶</th><th>品項</th><th>未稅</th><th>稅額</th><th>總計</th><th>狀態</th><th>操作</th></tr></thead><tbody>'+erpSalesOrdersCache.map(x=>{const t=erpDisplayTotals(x),source=!!x.sourceTransactionId;let actions='';if(x.status==="confirmed"){actions='<button class="erp-print-btn" data-print="'+x.id+'">預覽列印</button>';}else if(source){actions='<button class="erp-edit-btn" data-edit="'+x.id+'">帶入銷貨單資訊</button>'+(x.status==="draft"?'<button class="erp-edit-btn" data-delete="'+x.id+'">刪除</button>':'')+(x.status==="submitted"?'<button class="erp-confirm-btn" data-confirm="'+x.id+'">確認</button>':'');}else{actions=x.status==="draft"?'<button class="erp-edit-btn" data-delete="'+x.id+'">刪除舊草稿</button>':'<span class="erp-muted">舊版資料</span>';}return '<tr><td><strong>'+erpEscape(x.orderNo)+'</strong></td><td>'+erpEscape(x.customerName)+'</td><td>'+erpLineSummary(x)+'</td><td>NT$ '+erpMoney(t.subtotal)+'</td><td>NT$ '+erpMoney(t.taxAmount)+'</td><td><strong>NT$ '+erpMoney(t.totalAmount)+'</strong></td><td>'+erpStatus(x.status)+(x.invoiceId?'<br><span class="erp-invoiced-tag">已月結</span>':'')+'</td><td>'+actions+'</td></tr>';}).join("")+'</tbody></table></div>':'<div class="erp-empty">尚無銷貨單。</div>')+'</section>';
+  const bindListActions=()=>{
+    el.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>{erpSalesEditingId=b.dataset.edit;renderErpSales();}));
+    el.querySelectorAll("[data-confirm]").forEach(b=>b.addEventListener("click",()=>confirmErpSalesOrder(b.dataset.confirm)));
+    el.querySelectorAll("[data-delete]").forEach(b=>b.addEventListener("click",()=>deleteErpDraft(b.dataset.delete)));
+    el.querySelectorAll("[data-print]").forEach(b=>b.addEventListener("click",()=>openErpPrintPreview(erpSalesOrdersCache.find(x=>x.id===b.dataset.print))));
+  };
+  bindListActions();
   const form=document.getElementById("erpSalesForm");
   if(!form)return;
   const getLines=()=>[{itemSource:o.sourceType||line.itemSource||"custom",itemName:line.itemName,quantity:Number(line.quantity)||0,unitPrice:Number(form.elements.unitPrice.value)||0}];
@@ -145,10 +152,6 @@ function renderErpSales(){
   document.getElementById("erpSaveDraftBtn").addEventListener("click",()=>saveErpMulti(form,getLines,"draft"));
   form.addEventListener("submit",e=>{e.preventDefault();saveErpMulti(form,getLines,"submitted");});
   refresh();
-  el.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>{erpSalesEditingId=b.dataset.edit;renderErpSales();}));
-  el.querySelectorAll("[data-confirm]").forEach(b=>b.addEventListener("click",()=>confirmErpSalesOrder(b.dataset.confirm)));
-  el.querySelectorAll("[data-delete]").forEach(b=>b.addEventListener("click",()=>deleteErpDraft(b.dataset.delete)));
-  el.querySelectorAll("[data-print]").forEach(b=>b.addEventListener("click",()=>openErpPrintPreview(erpSalesOrdersCache.find(x=>x.id===b.dataset.print))));
 }
 async function saveErpMulti(form,getLines,status){if(!form.reportValidity())return;const lines=getLines();if(!lines.length)return alert("請至少填寫一個品項。");const t=erpCalcLines(lines,form.elements.taxMode.value),customer=erpCustomersCache.find(c=>c.id===form.elements.customerId.value),data={orderNo:form.elements.orderNo.value.trim(),orderDate:form.elements.orderDate.value,customerId:customer?customer.id:null,customerName:form.elements.customerName.value.trim(),salesperson:form.elements.salesperson.value.trim(),taxMode:form.elements.taxMode.value,lines, itemSource:lines[0].itemSource,itemName:lines[0].itemName,quantity:lines[0].quantity,unitPrice:lines[0].unitPrice,lineAmount:t.lineAmount,amount:t.lineAmount,subtotalAmount:t.subtotal,taxAmount:t.taxAmount,totalAmount:t.totalAmount,taxRate:t.taxRate,notes:form.elements.notes.value.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};try{if(erpSalesEditingId){await db.collection("erpSalesOrders").doc(erpSalesEditingId).update({...data,status});erpSalesEditingId=null;}else{await db.collection("erpSalesOrders").add({...data,status,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});form.reset();} }catch(e){console.error(e);alert("儲存失敗，請稍後再試。");}}
 
