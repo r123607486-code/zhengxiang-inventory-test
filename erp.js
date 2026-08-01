@@ -58,7 +58,7 @@ function erpOrderNumber(){
 }
 
 function openErpWorkspace(){
-  if(!currentUser || currentUser.role !== "admin") return;
+  if(!userHasAnyRole("accounting")) return;
   const app = document.getElementById("erpApp");
   document.getElementById("categoryScreen").classList.add("hidden");
   document.getElementById("app").classList.add("hidden");
@@ -100,7 +100,7 @@ function buildErpWorkspace(){
         <section class="erp-page hidden" id="erp-page-receivables"></section>
       </main>
     </div>`;
-  document.getElementById("erpWhoLabel").textContent = currentUser.name + "｜管理者";
+  document.getElementById("erpWhoLabel").textContent = currentUser.name + "｜" + userRolesLabel(currentUser.roles);
   document.getElementById("erpBackBtn").addEventListener("click", showCategoryScreen);
   app.querySelectorAll("[data-erp-view]").forEach(btn => btn.addEventListener("click", () => showErpView(btn.dataset.erpView)));
 }
@@ -196,4 +196,3 @@ function renderErpDashboard(){
     </section>`;
   el.querySelectorAll("[data-erp-go]").forEach(btn => btn.addEventListener("click", () => showErpView(btn.dataset.erpGo)));
 }
-
