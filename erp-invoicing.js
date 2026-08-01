@@ -76,7 +76,7 @@ async function createErpInvoice(){
   const totals=erpInvoiceTotal(selected);
   if(!confirm("建立月結發票？含稅總計 NT$ "+erpMoney(totals.totalAmount)+"。"))return;
   const invoiceRef=db.collection("erpInvoices").doc(), receivableRef=db.collection("erpReceivables").doc(), invoiceNo=erpInvoiceNumber();
-  const customer=erpCustomersCache.find(c=>(c.name||"")===customerName);
+  const customer=erpPartiesCache.find(c=>(c.name||"")===customerName);
   const lines=selected.flatMap(erpInvoiceLinesForOrder);
   const invoice={invoiceNo,invoiceDate:todayStr(),customerId:customer?customer.id:null,customerName,periodFrom:erpInvoiceFilter.from,periodTo:erpInvoiceFilter.to,saleOrderIds:selected.map(o=>o.id),lines,subtotalAmount:totals.subtotal,taxAmount:totals.taxAmount,totalAmount:totals.totalAmount,taxRate:commonTaxMode==="no_tax"?0:.05,status:"issued",createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name};
   const batch=db.batch();batch.set(invoiceRef,invoice);batch.set(receivableRef,{invoiceId:invoiceRef.id,invoiceNo,invoiceDate:invoice.invoiceDate,customerId:invoice.customerId,customerName,originalAmount:totals.totalAmount,receivedAmount:0,balanceAmount:totals.totalAmount,status:"open",createdAt:firebase.firestore.FieldValue.serverTimestamp()});
