@@ -141,6 +141,9 @@ function renderKybMaster(){
     const locHtml = options.length
       ? options.map(o=>`<div class="loc-line${o.code===PENDING_STOCK_CODE?' loc-pending':''}" data-id="${it.id}" data-code="${escapeHtml(o.code)}">${escapeHtml(o.code)}：${o.qty}</div>`).join("")
       : `<span class="empty-inline">無庫存</span>`;
+    const priceCellsHtml = PRICE_TEMPLATES.kyb.map(f=>
+      `<td class="price-field-cell${canManage?' editable-cell':''}" data-id="${it.id}" data-field="${f.key}" data-label="${escapeHtml(f.label)}">${it[f.key]!=null?it[f.key]:"未填"}</td>`
+    ).join("");
     return `<tr class="${pending?'row-pending':''}">
       <td>${escapeHtml(it.carModel)}${pending?'<span class="pending-tag">尚未入庫</span>':''}</td>
       <td>${escapeHtml(it.carMake||"")}</td>
@@ -149,8 +152,7 @@ function renderKybMaster(){
       <td class="loc-detail-cell">${locHtml}</td>
       <td>${escapeHtml(it.yearCode||"")}</td>
       <td>${escapeHtml(it.partNo||"")}</td>
-      <td class="editable-cell kyb-warranty-cell" data-id="${it.id}">${it.warrantyPrice!=null?it.warrantyPrice:"未填"}</td>
-      <td class="editable-cell kyb-catalog-cell" data-id="${it.id}">${it.catalogPrice!=null?it.catalogPrice:"未填"}</td>
+      ${priceCellsHtml}
       <td>${escapeHtml(it.remark||"")}</td>
       <td>${canManage ? `<button data-del="${it.id}" data-model="${escapeHtml(it.carModel)}">刪除</button>` : ""}</td>
     </tr>`;
@@ -160,11 +162,10 @@ function renderKybMaster(){
     el.addEventListener("click", ()=> openKybLocationModal(el.dataset.id, el.dataset.code));
   });
   if(canManage){
-    body.querySelectorAll(".kyb-catalog-cell").forEach(td=> td.addEventListener("click", ()=> editKybPrice(td.dataset.id, "catalogPrice", "一線消費者售價")));
-    body.querySelectorAll(".kyb-warranty-cell").forEach(td=> td.addEventListener("click", ()=> editKybPrice(td.dataset.id, "warrantyPrice", "保修廠價")));
+    body.querySelectorAll(".price-field-cell").forEach(td=>{
+      td.addEventListener("click", ()=> editPriceField("kybItems", kybItemsCache, td.dataset.id, td.dataset.field, td.dataset.label));
+    });
     body.querySelectorAll("[data-del]").forEach(b=> b.addEventListener("click", ()=> deleteKybItem(b.dataset.del, b.dataset.model)));
-  } else {
-    body.querySelectorAll(".kyb-catalog-cell,.kyb-warranty-cell").forEach(td=> td.classList.remove("editable-cell"));
   }
   window._kybMasterFilteredList = list;
 }
@@ -223,31 +224,14 @@ function openKybLocationModal(itemId, code){
   });
 }
 
-function editKybPrice(itemId, field, label){
-  if(!userHasAnyRole("warehouse")) return;
-  const item = kybItemsCache.find(i=>i.id===itemId);
-  if(!item) return;
-  const cur = item[field]!=null ? String(item[field]) : "";
-  const input = prompt(`輸入${label}金額（純數字）`, cur);
-  if(input === null) return;
-  const val = input.trim();
-  const update = {};
-  if(val === ""){ update[field] = null; }
-  else{
-    const num = Number(val);
-    if(isNaN(num)){ alert("請輸入數字"); return; }
-    update[field] = num;
-  }
-  db.collection("kybItems").doc(itemId).update(update).catch(e=>alert("更新失敗："+e.message));
-}
-
 document.getElementById("kybExportBtn").addEventListener("click", ()=>{
   const list = window._kybMasterFilteredList || [];
-  const rows = list.map(it=>({
-    車型: it.carModel, 廠牌: it.carMake||"", 避震款式: it.bucketType||"", 總量: kybTotalQty(it), 儲位分布: kybLocSummary(it),
-    年份代碼: it.yearCode||"", 料號: it.partNo||"",
-    保修廠價: it.warrantyPrice!=null?it.warrantyPrice:"", 一線消費者售價: it.catalogPrice!=null?it.catalogPrice:"", 備註: it.remark||""
-  }));
+  const rows = list.map(it=>{
+    const row = { 車型: it.carModel, 廠牌: it.carMake||"", 避震款式: it.bucketType||"", 總量: kybTotalQty(it), 儲位分布: kybLocSummary(it), 年份代碼: it.yearCode||"", 料號: it.partNo||"" };
+    PRICE_TEMPLATES.kyb.forEach(f=>{ row[f.label] = it[f.key]!=null ? it[f.key] : ""; });
+    row.備註 = it.remark||"";
+    return row;
+  });
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "資料");
