@@ -31,12 +31,22 @@ function deleteLocation(locId, code){
 
 document.getElementById("newUserBtn").addEventListener("click", openNewUserModal);
 
+function userRolesOf(u){
+  return (Array.isArray(u.roles) && u.roles.length) ? u.roles : (u.role==="admin" ? ["admin"] : ["sales","warehouse"]);
+}
+function roleCheckboxGroupHtml(checkedRoles){
+  return ROLE_DEFS.map(r=>`<label class="role-checkbox"><input type="checkbox" value="${r.id}" ${checkedRoles.includes(r.id)?'checked':''}> ${r.label}</label>`).join("");
+}
+function readCheckedRoles(){
+  return Array.from(document.querySelectorAll('#modalSheet .role-checkbox input[type=checkbox]:checked')).map(el=>el.value);
+}
+
 function renderUsers(){
   const body = document.getElementById("userBody");
   body.innerHTML = usersCache.map(u=>`<tr>
     <td>${escapeHtml(u.name)}</td>
     <td>${escapeHtml(u.username)}</td>
-    <td>${u.role==='admin'?'管理者':'員工'}</td>
+    <td>${escapeHtml(userRolesLabel(userRolesOf(u)))}</td>
     <td><span class="badge ${u.active!==false?'on':'off'}">${u.active!==false?'啟用':'停用'}</span></td>
     <td>
       <button data-toggle="${u.id}" data-active="${u.active!==false}">${u.active!==false?'停用':'啟用'}</button>
@@ -55,13 +65,26 @@ function renderUsers(){
 function editUser(uid){
   const u = usersCache.find(x=>x.id===uid);
   if(!u) return;
-  const newName = prompt("修改姓名：", u.name);
-  if(newName === null) return;
-  const roleInput = prompt("修改角色：輸入「管理者」或「員工」", u.role==='admin'?'管理者':'員工');
-  if(roleInput === null) return;
-  const role = roleInput.trim()==='管理者' ? 'admin' : 'member';
-  db.collection("users").doc(uid).update({ name: newName.trim() || u.name, role })
-    .catch(e=>alert("更新失敗："+e.message));
+  const curRoles = userRolesOf(u);
+  const html = `
+    <div class="sheet-head"><h2>編輯使用者</h2><button class="sheet-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row"><label>姓名</label><input type="text" id="editUserName" value="${escapeHtml(u.name)}"></div>
+    <div class="form-row"><label>角色（可複選，一人可身兼多職）</label>
+      <div class="role-checkbox-group">${roleCheckboxGroupHtml(curRoles)}</div>
+    </div>
+    <div class="form-actions">
+      <button onclick="closeModal()">取消</button>
+      <button class="primary" id="editUserSaveBtn">儲存</button>
+    </div>`;
+  openModal(html);
+  document.getElementById("editUserSaveBtn").addEventListener("click", ()=>{
+    const newName = document.getElementById("editUserName").value.trim();
+    const roles = readCheckedRoles();
+    if(!roles.length){ alert("請至少勾選一個角色"); return; }
+    db.collection("users").doc(uid).update({
+      name: newName || u.name, roles, role: roles.includes("admin") ? "admin" : "member"
+    }).then(()=>closeModal()).catch(e=>alert("更新失敗："+e.message));
+  });
 }
 
 function deleteUser(uid, name){
@@ -96,8 +119,8 @@ function openNewUserModal(){
     <div class="form-row"><label>姓名</label><input type="text" id="newUserName"></div>
     <div class="form-row"><label>帳號（不用email格式，簡單英數即可）</label><input type="text" id="newUserUsername"></div>
     <div class="form-row"><label>初始密碼</label><input type="text" id="newUserPassword" value="123456"></div>
-    <div class="form-row"><label>角色</label>
-      <select id="newUserRole"><option value="member">員工</option><option value="admin">管理者</option></select>
+    <div class="form-row"><label>角色（可複選，一人可身兼多職，例如業務兼倉管）</label>
+      <div class="role-checkbox-group">${roleCheckboxGroupHtml(["sales","warehouse"])}</div>
     </div>
     <div class="note">初始密碼請當面或用其他管道告知員工，系統不會保存明文密碼，事後也無法查回。忘記密碼請用「刪除」後重新建立帳號，或請該員工自行用「改密碼」設定新密碼。</div>
     <div class="form-actions">
@@ -109,12 +132,15 @@ function openNewUserModal(){
     const name = document.getElementById("newUserName").value.trim();
     const uname = document.getElementById("newUserUsername").value.trim();
     const pw = document.getElementById("newUserPassword").value;
-    const role = document.getElementById("newUserRole").value;
+    const roles = readCheckedRoles();
     if(!name || !uname || !pw){ alert("請填寫完整資料"); return; }
+    if(!roles.length){ alert("請至少勾選一個角色"); return; }
     const email = uname + "@" + INTERNAL_EMAIL_DOMAIN;
     try{
       const cred = await secondaryAuth.createUserWithEmailAndPassword(email, pw);
-      await db.collection("users").doc(cred.user.uid).set({name, username:uname, role, active:true});
+      await db.collection("users").doc(cred.user.uid).set({
+        name, username:uname, roles, role: roles.includes("admin") ? "admin" : "member", active:true
+      });
       await secondaryAuth.signOut();
       closeModal();
     }catch(e){
