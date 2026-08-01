@@ -46,37 +46,39 @@ function renderErpInvoices(){
   el.querySelectorAll("[data-erp-print-invoice]").forEach(btn=>btn.addEventListener("click",()=>{const inv=erpInvoicesCache.find(x=>x.id===btn.dataset.erpPrintInvoice);if(inv)openErpPrintPreview(null,inv);}));
   el.querySelectorAll("[data-invoice-void]").forEach(btn=>btn.addEventListener("click",()=>voidErpInvoice(btn.dataset.invoiceVoid)));
 }
-async function createErpInvoice(){
-  const checked=[...document.querySelectorAll("[data-invoice-sale]:checked")];
-  const selected=checked.map(x=>erpSalesOrdersCache.find(o=>o.id===x.dataset.invoiceSale)).filter(Boolean);
-  if(!selected.length)return alert("請至少選擇一筆銷貨單。");
-  const customerName=erpInvoiceFilter.customerName;
-  if(!customerName||selected.some(o=>(o.customerName||"未指定客戶")!==customerName))return alert("月結發票只能合併同一位客戶的銷貨單。");
-  if(selected.some(o=>o.status!=="confirmed"||o.invoiceId))return alert("選取內容已變更，請重新整理後再試。");
-  const totals=erpInvoiceTotal(selected);
-  if(!confirm("建立「"+customerName+"」的月結發票？\n共 "+selected.length+" 筆銷貨單，含稅總計 NT$ "+erpMoney(totals.totalAmount)+"。\n建立後將無法再次納入其他月結發票。"))return;
-  const ref=db.collection("erpInvoices").doc();
-  const invoiceNo=erpInvoiceNumber();
-  const customer=erpCustomersCache.find(c=>(c.name||"")===customerName);
-  const lines=selected.map(o=>{const t=erpDisplayTotals(o);return {saleOrderId:o.id,orderNo:o.orderNo,orderDate:o.orderDate,itemName:o.itemName,quantity:Number(o.quantity)||0,unitPrice:Number(o.unitPrice)||0,taxMode:o.taxMode||"no_tax",subtotalAmount:t.subtotal,taxAmount:t.taxAmount,totalAmount:t.totalAmount};});
-  const batch=db.batch();
-  batch.set(ref,{invoiceNo,invoiceDate:todayStr(),customerId:customer?customer.id:null,customerName,periodFrom:erpInvoiceFilter.from,periodTo:erpInvoiceFilter.to,saleOrderIds:selected.map(o=>o.id),lines,subtotalAmount:totals.subtotal,taxAmount:totals.taxAmount,totalAmount:totals.totalAmount,taxRate:0.05,status:"issued",createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});
-  selected.forEach(o=>batch.update(db.collection("erpSalesOrders").doc(o.id),{invoiceId:ref.id,invoiceNo, invoicedAt:firebase.firestore.FieldValue.serverTimestamp()}));
-  try{await batch.commit();alert("月結發票已建立。你現在可以在下方的「已建立的月結發票」預覽列印。");}
-  catch(err){console.error(err);alert("建立月結發票失敗。請確認 Firebase Rules 已加入 erpInvoices 權限後再試。");}
+// 把一張銷貨單的明細換算成發票明細：小計依訂單整體的稅別換算（含稅單要把單價還原成未稅），
+// 並依各行原始金額的佔比分攤到訂單的未稅小計，確保「明細加總」一定等於「表頭未稅小計」（最後一行吃進位差額）。
+function erpInvoiceLinesForOrder(o){
+  const lines=erpOrderLines(o);
+  const t=erpDisplayTotals(o);
+  const rawTotal=lines.reduce((s,l)=>s+(Number(l.quantity)||0)*(Number(l.unitPrice)||0),0);
+  let allocated=0;
+  return lines.map((l,i)=>{
+    const raw=(Number(l.quantity)||0)*(Number(l.unitPrice)||0);
+    let subtotalAmount;
+    if(i===lines.length-1){
+      subtotalAmount=t.subtotal-allocated;
+    }else{
+      subtotalAmount=rawTotal>0?Math.round(t.subtotal*(raw/rawTotal)):0;
+      allocated+=subtotalAmount;
+    }
+    return {saleOrderId:o.id,orderNo:o.orderNo,orderDate:o.orderDate,itemName:l.itemName,quantity:Number(l.quantity)||0,unitPrice:Number(l.unitPrice)||0,subtotalAmount};
+  });
 }
-
 async function createErpInvoice(){
   const selected=[...document.querySelectorAll("[data-invoice-sale]:checked")].map(x=>erpSalesOrdersCache.find(o=>o.id===x.dataset.invoiceSale)).filter(Boolean);
   const customerName=erpInvoiceFilter.customerName;
   if(!selected.length)return alert("請至少選擇一筆銷貨單。");
   if(!customerName||selected.some(o=>(o.customerName||"未指定客戶")!==customerName||o.status!=="confirmed"||o.invoiceId))return alert("選取內容已變更，請重新整理後再試。");
+  const taxModes=new Set(selected.map(o=>o.taxMode||"no_tax"));
+  if(taxModes.size>1)return alert("選取的銷貨單稅別不一致（同時包含不計稅／含稅／未稅外加），月結發票只能合併稅別相同的銷貨單，請重新勾選。");
+  const commonTaxMode=[...taxModes][0];
   const totals=erpInvoiceTotal(selected);
   if(!confirm("建立月結發票？含稅總計 NT$ "+erpMoney(totals.totalAmount)+"。"))return;
   const invoiceRef=db.collection("erpInvoices").doc(), receivableRef=db.collection("erpReceivables").doc(), invoiceNo=erpInvoiceNumber();
   const customer=erpCustomersCache.find(c=>(c.name||"")===customerName);
-  const lines=selected.flatMap(o=>erpOrderLines(o).map(l=>({saleOrderId:o.id,orderNo:o.orderNo,orderDate:o.orderDate,itemName:l.itemName,quantity:Number(l.quantity)||0,unitPrice:Number(l.unitPrice)||0,subtotalAmount:Math.round((Number(l.quantity)||0)*(Number(l.unitPrice)||0))})));
-  const invoice={invoiceNo,invoiceDate:todayStr(),customerId:customer?customer.id:null,customerName,periodFrom:erpInvoiceFilter.from,periodTo:erpInvoiceFilter.to,saleOrderIds:selected.map(o=>o.id),lines,subtotalAmount:totals.subtotal,taxAmount:totals.taxAmount,totalAmount:totals.totalAmount,taxRate:.05,status:"issued",createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name};
+  const lines=selected.flatMap(erpInvoiceLinesForOrder);
+  const invoice={invoiceNo,invoiceDate:todayStr(),customerId:customer?customer.id:null,customerName,periodFrom:erpInvoiceFilter.from,periodTo:erpInvoiceFilter.to,saleOrderIds:selected.map(o=>o.id),lines,subtotalAmount:totals.subtotal,taxAmount:totals.taxAmount,totalAmount:totals.totalAmount,taxRate:commonTaxMode==="no_tax"?0:.05,status:"issued",createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name};
   const batch=db.batch();batch.set(invoiceRef,invoice);batch.set(receivableRef,{invoiceId:invoiceRef.id,invoiceNo,invoiceDate:invoice.invoiceDate,customerId:invoice.customerId,customerName,originalAmount:totals.totalAmount,receivedAmount:0,balanceAmount:totals.totalAmount,status:"open",createdAt:firebase.firestore.FieldValue.serverTimestamp()});
   selected.forEach(o=>batch.update(db.collection("erpSalesOrders").doc(o.id),{invoiceId:invoiceRef.id,invoiceNo,invoicedAt:firebase.firestore.FieldValue.serverTimestamp()}));
   try{await batch.commit();alert("月結發票與應收帳款已建立。");}catch(e){console.error(e);alert("建立失敗，請確認 Firebase Rules 已加入 erpInvoices 與 erpReceivables 權限。");}
