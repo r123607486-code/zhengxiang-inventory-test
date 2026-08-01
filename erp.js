@@ -1,11 +1,14 @@
 // ERP 共用核心：狀態、導覽、即時資料監聽與儀表板
 // ============================================================
 // ERP 管理中心（第一階段）
-// 範圍：客戶、銷貨訂單草稿／送出／確認、即時儀表板。
+// 範圍：客戶（往來對象主檔）、銷貨訂單草稿／送出／確認、即時儀表板。
 // 此模組不會扣輪胎或 KYB 庫存，也不會建立應收帳款。
 // ============================================================
+// 往來對象主檔：erpParties（取代舊的 erpCustomers），加了 type 欄位（目前固定 "customer"），
+// 是為了幫批12「應付端」的廠商資料鋪路——之後廠商也能共用同一張主檔表，只是 type 不同。
+// 舊的 erpCustomers collection 保留不刪，當備份；erp-customers.js 裡有一次性搬移按鈕可以把舊資料轉過來。
 
-let erpCustomersCache = [];
+let erpPartiesCache = [];
 let erpSalesOrdersCache = [];
 let erpListenersStarted = false;
 let erpView = "dashboard";
@@ -117,8 +120,8 @@ function showErpView(view){
 function startErpListeners(){
   if(erpListenersStarted) return;
   erpListenersStarted = true;
-  db.collection("erpCustomers").onSnapshot(snap => {
-    erpCustomersCache = snap.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => (a.name || "").localeCompare(b.name || "", "zh-Hant"));
+  db.collection("erpParties").onSnapshot(snap => {
+    erpPartiesCache = snap.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => (a.name || "").localeCompare(b.name || "", "zh-Hant"));
     renderErpViews();
   }, err => erpShowDataError(err));
   db.collection("erpSalesOrders").onSnapshot(snap => {
@@ -171,7 +174,7 @@ function erpShowDataError(err){
 function renderErpViews(){
   if(!document.getElementById("erpApp") || document.getElementById("erpApp").classList.contains("hidden")) return;
   renderErpDashboard();
-  renderErpCustomers();
+  renderErpParties();
   renderErpSales();
   renderErpTransfers();
   renderErpInvoices();
@@ -187,7 +190,7 @@ function renderErpDashboard(){
   el.innerHTML = `
     <div class="erp-page-heading"><div><p class="erp-kicker">WORKSPACE OVERVIEW</p><h1>早安，${erpEscape(currentUser ? currentUser.name : "")}</h1><p>從這裡掌握銷貨作業的目前進度。</p></div><div class="erp-heading-actions"><button class="erp-primary" data-erp-go="customers">${ERP_ICONS.add} 新增客戶</button><button class="erp-secondary" data-erp-go="sales">${ERP_ICONS.add} 建立銷貨單</button></div></div>
     <div class="erp-metric-grid">
-      <article class="erp-metric"><span>客戶數</span><strong>${erpCustomersCache.length}</strong><small>可供建立銷貨單</small></article>
+      <article class="erp-metric"><span>客戶數</span><strong>${erpPartiesCache.filter(p=>(p.type||"customer")==="customer").length}</strong><small>可供建立銷貨單</small></article>
       <article class="erp-metric"><span>待確認銷貨單</span><strong>${submitted}</strong><small>已送出，尚未確認</small></article>
       <article class="erp-metric"><span>本期已確認</span><strong>${confirmed}</strong><small>尚未扣庫存或入帳</small></article>
     </div>
