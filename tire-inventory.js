@@ -143,14 +143,16 @@ function renderMaster(){
     const locHtml = details.length
       ? details.map(d=>`<div class="loc-line${d.expired?' loc-expired':''}${d.code===PENDING_STOCK_CODE?' loc-pending':''}" data-id="${it.id}" data-code="${escapeHtml(d.code)}" data-idx="${d.idx}">${escapeHtml(d.code)}：${d.qty}${d.date?`（${escapeHtml(d.date)}）`:''}</div>`).join("")
       : `<span class="empty-inline">無庫存</span>`;
+    const priceCellsHtml = PRICE_TEMPLATES.tire.map(f=>
+      `<td class="price-field-cell${canManage?' editable-cell':''}" data-id="${it.id}" data-field="${f.key}" data-label="${escapeHtml(f.label)}">${it[f.key]!=null?it[f.key]:"未填"}</td>`
+    ).join("");
     return `<tr class="${rowExpired?'expire':''} ${pending?'row-pending':''}">
       <td>${escapeHtml(it.brand)}</td>
       <td>${escapeHtml(it.model||"")}${pending?'<span class="pending-tag">尚未入庫</span>':''}</td>
       <td>${escapeHtml(it.spec)}</td>
       <td>${totalQty(it)}</td>
       <td class="loc-detail-cell">${locHtml}</td>
-      <td class="twenty-cell${canManage?' editable-cell':''}" data-id="${it.id}">${it.twenty!=null?it.twenty:"未填"}</td>
-      <td class="price-cell${canManage?' editable-cell':''}" data-id="${it.id}">${it.sellPrice!=null?it.sellPrice:"未填"}</td>
+      ${priceCellsHtml}
       <td>${escapeHtml(it.remark||"")}</td>
       <td>${canManage ? `<button data-del="${it.id}" data-label="${escapeHtml(it.brand)} ${escapeHtml(it.spec)}">刪除</button>` : ""}</td>
     </tr>`;
@@ -160,11 +162,8 @@ function renderMaster(){
     el.addEventListener("click", ()=> openLocationModal(el.dataset.id, el.dataset.code, Number(el.dataset.idx)));
   });
   if(canManage){
-    body.querySelectorAll(".twenty-cell").forEach(td=>{
-      td.addEventListener("click", ()=> editTwenty(td.dataset.id));
-    });
-    body.querySelectorAll(".price-cell").forEach(td=>{
-      td.addEventListener("click", ()=> editSellPrice(td.dataset.id));
+    body.querySelectorAll(".price-field-cell").forEach(td=>{
+      td.addEventListener("click", ()=> editPriceField("items", itemsCache, td.dataset.id, td.dataset.field, td.dataset.label));
     });
     body.querySelectorAll("[data-del]").forEach(b=>{
       b.addEventListener("click", ()=> deleteItem(b.dataset.del, b.dataset.label));
@@ -260,49 +259,17 @@ function openLocationModal(itemId, code, idx){
   });
 }
 
-function editTwenty(itemId){
-  if(!userHasAnyRole("warehouse")) return;
-  const item = itemsCache.find(i=>i.id===itemId);
-  if(!item) return;
-  const cur = item.twenty!=null ? String(item.twenty) : "";
-  const input = prompt("輸入20%金額（純數字）", cur);
-  if(input === null) return;
-  const val = input.trim();
-  if(val === ""){
-    db.collection("items").doc(itemId).update({ twenty: null }).catch(e=>alert("更新失敗："+e.message));
-    return;
-  }
-  const num = Number(val);
-  if(isNaN(num)){ alert("請輸入數字"); return; }
-  db.collection("items").doc(itemId).update({ twenty: num }).catch(e=>alert("更新失敗："+e.message));
-}
-
-function editSellPrice(itemId){
-  if(!userHasAnyRole("warehouse")) return;
-  const item = itemsCache.find(i=>i.id===itemId);
-  if(!item) return;
-  const cur = item.sellPrice!=null ? String(item.sellPrice) : "";
-  const input = prompt("輸入售價金額（純數字）", cur);
-  if(input === null) return;
-  const val = input.trim();
-  if(val === ""){
-    db.collection("items").doc(itemId).update({ sellPrice: null }).catch(e=>alert("更新失敗："+e.message));
-    return;
-  }
-  const num = Number(val);
-  if(isNaN(num)){ alert("請輸入數字"); return; }
-  db.collection("items").doc(itemId).update({ sellPrice: num }).catch(e=>alert("更新失敗："+e.message));
-}
-
 document.getElementById("exportFilteredBtn").addEventListener("click", ()=>{
   exportItemsToExcel(window._masterFilteredList || [], "庫存總表_篩選結果");
 });
 
 function exportItemsToExcel(list, filename){
-  const rows = list.map(it=>({
-    品牌: it.brand, 型號: it.model, 規格: it.spec, 總量: totalQty(it),
-    儲位分布: locSummary(it), "20%": it.twenty!=null?it.twenty:"", 售價: it.sellPrice!=null?it.sellPrice:"", 備註: it.remark||""
-  }));
+  const rows = list.map(it=>{
+    const row = { 品牌: it.brand, 型號: it.model, 規格: it.spec, 總量: totalQty(it), 儲位分布: locSummary(it) };
+    PRICE_TEMPLATES.tire.forEach(f=>{ row[f.label] = it[f.key]!=null ? it[f.key] : ""; });
+    row.備註 = it.remark||"";
+    return row;
+  });
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "資料");
