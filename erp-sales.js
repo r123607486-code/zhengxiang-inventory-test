@@ -68,7 +68,7 @@ async function importErpSourceSale(source){
   try{
     await db.collection("erpSalesOrders").add({
       orderNo:erpOrderNumber(), orderDate:source.date || todayStr(),
-      customerId:customer ? customer.id : null, customerName:source.customerName || "",
+      customerId:customer ? customer.id : null, customerCode:customer ? (customer.partyCode || "") : "", customerName:source.customerName || "",
       taxMode:"no_tax", salesperson:source.salesperson, itemSource:source.sourceType,
       itemName:source.itemName, quantity:source.quantity, unitPrice:0, amount:0,
       notes:source.notes || "", status:"draft", sourceType:source.sourceType,
@@ -110,7 +110,7 @@ function renderErpSales(){
   const o=erpSalesEditingId?erpSalesOrdersCache.find(x=>x.id===erpSalesEditingId):null;
   const isSource=!!(o&&o.sourceTransactionId);
   const editable=!!(o&&isSource&&o.status!=="confirmed");
-  const customers=erpCustomerParties().map(c=>'<option value="'+erpEscape(c.id)+'"'+(o&&o.customerId===c.id?" selected":"")+">"+erpEscape(c.name)+"</option>").join("");
+  const customers=erpCustomerParties().map(c=>'<option value="'+erpEscape(c.id)+'"'+(o&&o.customerId===c.id?" selected":"")+">"+erpEscape((c.partyCode ? c.partyCode+"｜" : "")+c.name)+"</option>").join("");
   const val=(k,f="")=>erpEscape(o&&o[k]!=null?o[k]:f);
   const sel=(k,x)=>o&&o[k]===x?" selected":"";
   const line=o?erpOrderLines(o)[0]:null;
@@ -154,6 +154,6 @@ function renderErpSales(){
   form.addEventListener("submit",e=>{e.preventDefault();saveErpMulti(form,getLines,"submitted");});
   refresh();
 }
-async function saveErpMulti(form,getLines,status){if(!form.reportValidity())return;const lines=getLines();if(!lines.length)return alert("請至少填寫一個品項。");const t=erpCalcLines(lines,form.elements.taxMode.value),customer=erpCustomerParties().find(c=>c.id===form.elements.customerId.value),data={orderNo:form.elements.orderNo.value.trim(),orderDate:form.elements.orderDate.value,customerId:customer?customer.id:null,customerName:form.elements.customerName.value.trim(),salesperson:form.elements.salesperson.value.trim(),taxMode:form.elements.taxMode.value,lines, itemSource:lines[0].itemSource,itemName:lines[0].itemName,quantity:lines[0].quantity,unitPrice:lines[0].unitPrice,lineAmount:t.lineAmount,amount:t.lineAmount,subtotalAmount:t.subtotal,taxAmount:t.taxAmount,totalAmount:t.totalAmount,taxRate:t.taxRate,notes:form.elements.notes.value.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};try{if(erpSalesEditingId){await db.collection("erpSalesOrders").doc(erpSalesEditingId).update({...data,status});erpSalesEditingId=null;}else{await db.collection("erpSalesOrders").add({...data,status,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});form.reset();} }catch(e){console.error(e);alert("儲存失敗，請稍後再試。");}}
+async function saveErpMulti(form,getLines,status){if(!form.reportValidity())return;const lines=getLines();if(!lines.length)return alert("請至少填寫一個品項。");const t=erpCalcLines(lines,form.elements.taxMode.value),customer=erpCustomerParties().find(c=>c.id===form.elements.customerId.value),data={orderNo:form.elements.orderNo.value.trim(),orderDate:form.elements.orderDate.value,customerId:customer?customer.id:null,customerCode:customer?(customer.partyCode||""):"",customerName:form.elements.customerName.value.trim(),salesperson:form.elements.salesperson.value.trim(),taxMode:form.elements.taxMode.value,lines, itemSource:lines[0].itemSource,itemName:lines[0].itemName,quantity:lines[0].quantity,unitPrice:lines[0].unitPrice,lineAmount:t.lineAmount,amount:t.lineAmount,subtotalAmount:t.subtotal,taxAmount:t.taxAmount,totalAmount:t.totalAmount,taxRate:t.taxRate,notes:form.elements.notes.value.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};try{if(erpSalesEditingId){await db.collection("erpSalesOrders").doc(erpSalesEditingId).update({...data,status});erpSalesEditingId=null;}else{await db.collection("erpSalesOrders").add({...data,status,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});form.reset();} }catch(e){console.error(e);alert("儲存失敗，請稍後再試。");}}
 
 async function deleteErpDraft(id){const o=erpSalesOrdersCache.find(x=>x.id===id);if(!o||o.status!=="draft")return;if(!confirm("刪除此銷貨草稿？此操作僅限未送出的草稿。"))return;try{await db.collection("erpSalesOrders").doc(id).delete();logErpAudit("sales_draft_deleted",id,{orderNo:o.orderNo});}catch(e){console.error(e);alert("刪除失敗。");}}
