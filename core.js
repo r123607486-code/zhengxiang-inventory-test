@@ -26,6 +26,25 @@ const CATEGORY_ICONS = {
   erp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 16v-3m5 3V8m5 8v-5"/><path d="M7 7h10"/></svg>'
 };
 
+// 角色與權限：先寫死四種角色，不做可自訂矩陣。
+// 一個使用者可以同時擁有多個角色（多數中小企業員工要身兼多職，例如業務兼倉管），
+// 因此 currentUser.roles 是陣列，而不是單一字串。
+const ROLE_DEFS = [
+  {id:"sales", label:"業務"},
+  {id:"warehouse", label:"倉管"},
+  {id:"accounting", label:"會計"},
+  {id:"admin", label:"管理者"},
+];
+function roleLabel(id){ const r=ROLE_DEFS.find(x=>x.id===id); return r?r.label:id; }
+function userRolesLabel(roles){ return (roles && roles.length) ? roles.map(roleLabel).join("、") : "未設定角色"; }
+// 檢查目前登入者是否具備列出的任一角色；管理者自動視為擁有全部權限。
+function userHasAnyRole(...need){
+  if(!currentUser) return false;
+  const roles = currentUser.roles || [];
+  if(roles.includes("admin")) return true;
+  return need.some(r=>roles.includes(r));
+}
+
 let currentUser = null;
 let currentCategory = null;
 let itemsCache = [];
@@ -173,9 +192,15 @@ auth.onAuthStateChanged(async (user)=>{
     return;
   }
   const data = doc.data();
-  currentUser = { uid: user.uid, name: data.name, username: data.username, role: data.role };
+  // 相容舊資料：舊版只有單一 role 字串（admin/member），新版改用 roles 陣列（可複選）。
+  // 沒有 roles 陣列時，依舊的 role 自動換算一組合理的預設角色，避免既有帳號被鎖住。
+  let roles = Array.isArray(data.roles) ? data.roles.filter(r=>ROLE_DEFS.some(d=>d.id===r)) : null;
+  if(!roles || roles.length===0){
+    roles = data.role === "admin" ? ["admin"] : ["sales","warehouse"];
+  }
+  currentUser = { uid: user.uid, name: data.name, username: data.username, roles };
   document.getElementById("splash").classList.add("hidden");
-  document.getElementById("whoLabel").textContent = `${currentUser.name}（${currentUser.role==='admin'?'管理者':'員工'}）`;
+  document.getElementById("whoLabel").textContent = `${currentUser.name}（${userRolesLabel(currentUser.roles)}）`;
   showCategoryScreen();
 });
 
@@ -186,19 +211,26 @@ document.getElementById("categoryIconErp").innerHTML = CATEGORY_ICONS.erp;
 function showCategoryScreen(){
   document.getElementById("app").classList.add("hidden");
   document.getElementById("erpApp").classList.add("hidden");
-  document.getElementById("erpCategoryCard").classList.toggle("hidden", !currentUser || currentUser.role !== "admin");
+  document.getElementById("erpCategoryCard").classList.toggle("hidden", !userHasAnyRole("accounting"));
+  // 商品與庫存（輪胎／KYB）僅限業務或倉管（或管理者）使用；純會計角色沒有這兩張卡片可點，
+  // 避免點進去後分頁清單是空的（buildTabs 會找不到可顯示的分頁）。
+  const canInventory = userHasAnyRole("sales","warehouse");
+  document.querySelectorAll(".category-card-inventory").forEach(card=>{
+    card.classList.toggle("hidden", !canInventory);
+  });
   document.getElementById("categoryScreen").classList.remove("hidden");
 }
 
 function switchToCategory(cat){
   if(cat === "erp"){
-    if(!currentUser || currentUser.role !== "admin"){ alert("ERP 管理中心僅限管理者使用"); return; }
+    if(!userHasAnyRole("accounting")){ alert("銷售與帳務僅限具備「會計」角色（或管理者）的使用者進入"); return; }
     currentCategory = "erp";
     document.getElementById("categoryScreen").classList.add("hidden");
     document.getElementById("app").classList.add("hidden");
     openErpWorkspace();
     return;
   }
+  if(!userHasAnyRole("sales","warehouse")){ alert("商品與庫存僅限具備「業務」或「倉管」角色（或管理者）的使用者進入"); return; }
   currentCategory = cat;
   document.getElementById("erpApp").classList.add("hidden");
   document.getElementById("categoryScreen").classList.add("hidden");
@@ -218,31 +250,40 @@ document.getElementById("switchCategoryBtn").addEventListener("click", ()=>{
   showCategoryScreen();
 });
 
+// 角色與各分頁的對應（先寫死，不做可自訂矩陣）：
+// 業務／倉管都能查詢與看庫存明細；「我的叫貨申請」是業務個人查看自己叫貨狀態；
+// 庫存異動、叫貨確認、儲位、資料匯入屬於倉管實際動庫存的操作；帳號與權限僅管理者。
 const TIRE_TAB_DEFS = [
-  {id:"query",    label:"庫存查詢", icon:ICONS.query,   roles:["admin","member"]},
-  {id:"myorders", label:"我的叫貨申請", icon:ICONS.myorders,roles:["member"]},
-  {id:"master",   label:"庫存明細", icon:ICONS.master,  roles:["admin","member"]},
-  {id:"txn",      label:"庫存異動", icon:ICONS.txn,   roles:["admin","member"]},
-  {id:"orders",   label:"庫存叫貨申請", icon:ICONS.orders,  roles:["admin"]},
-  {id:"loc",      label:"倉儲儲位", icon:ICONS.loc,     roles:["admin"]},
-  {id:"import",   label:"資料移轉與備份", icon:ICONS.txn,     roles:["admin"]},
+  {id:"query",    label:"庫存查詢", icon:ICONS.query,   roles:["sales","warehouse"]},
+  {id:"myorders", label:"我的叫貨申請", icon:ICONS.myorders,roles:["sales"]},
+  {id:"master",   label:"庫存明細", icon:ICONS.master,  roles:["sales","warehouse"]},
+  {id:"txn",      label:"庫存異動", icon:ICONS.txn,   roles:["warehouse"]},
+  {id:"orders",   label:"庫存叫貨申請", icon:ICONS.orders,  roles:["warehouse"]},
+  {id:"loc",      label:"倉儲儲位", icon:ICONS.loc,     roles:["warehouse"]},
+  {id:"import",   label:"資料移轉與備份", icon:ICONS.txn,     roles:["warehouse"]},
   {id:"users",    label:"帳號與權限", icon:ICONS.users, roles:["admin"]},
 ];
 const KYB_TAB_DEFS = [
-  {id:"kyb-query",    label:"庫存查詢", icon:ICONS.query,   roles:["admin","member"]},
-  {id:"kyb-myorders", label:"我的叫貨申請", icon:ICONS.myorders,roles:["member"]},
-  {id:"kyb-master",   label:"庫存明細", icon:ICONS.master,  roles:["admin","member"]},
-  {id:"kyb-txn",      label:"庫存異動", icon:ICONS.txn,   roles:["admin","member"]},
-  {id:"kyb-orders",   label:"庫存叫貨申請", icon:ICONS.orders,  roles:["admin"]},
-  {id:"kyb-loc",      label:"倉儲儲位", icon:ICONS.loc,     roles:["admin"]},
-  {id:"kyb-import",   label:"資料移轉與備份", icon:ICONS.txn,     roles:["admin"]},
+  {id:"kyb-query",    label:"庫存查詢", icon:ICONS.query,   roles:["sales","warehouse"]},
+  {id:"kyb-myorders", label:"我的叫貨申請", icon:ICONS.myorders,roles:["sales"]},
+  {id:"kyb-master",   label:"庫存明細", icon:ICONS.master,  roles:["sales","warehouse"]},
+  {id:"kyb-txn",      label:"庫存異動", icon:ICONS.txn,   roles:["warehouse"]},
+  {id:"kyb-orders",   label:"庫存叫貨申請", icon:ICONS.orders,  roles:["warehouse"]},
+  {id:"kyb-loc",      label:"倉儲儲位", icon:ICONS.loc,     roles:["warehouse"]},
+  {id:"kyb-import",   label:"資料移轉與備份", icon:ICONS.txn,     roles:["warehouse"]},
   {id:"users",        label:"帳號與權限", icon:ICONS.users, roles:["admin"]},
 ];
 function currentTabDefs(){ return currentCategory === "kyb" ? KYB_TAB_DEFS : TIRE_TAB_DEFS; }
 
 function buildTabs(){
   const nav = document.getElementById("tabs");
-  const visible = currentTabDefs().filter(t=>t.roles.includes(currentUser.role));
+  const visible = currentTabDefs().filter(t=>userHasAnyRole(...t.roles));
+  if(visible.length === 0){
+    // 理論上 switchToCategory 已經擋掉沒有 sales/warehouse 角色的人，這裡是防呆，避免畫面空白當機。
+    nav.innerHTML = "";
+    document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+    return;
+  }
   nav.innerHTML = visible.map((t,i)=>
     `<button data-tab="${t.id}" class="${i===0?'active':''}">${t.icon}${t.label}${t.id==='orders'?'<span class="badge-dot hidden" id="ordersTabBadge">0</span>':''}${t.id==='kyb-orders'?'<span class="badge-dot hidden" id="kybOrdersTabBadge">0</span>':''}</button>`
   ).join("");
@@ -271,7 +312,7 @@ window.addEventListener("resize", updateStickyOffsets);
 window.addEventListener("load", ()=> setTimeout(updateStickyOffsets, 100));
 
 function checkFridayBanner(){
-  if(currentUser.role !== "admin") return;
+  if(!userHasAnyRole("warehouse")) return;
   const isFriday = new Date().getDay() === 5;
   const dismissedKey = "backupBannerDismissed_" + todayStr();
   if(isFriday && !sessionStorage.getItem(dismissedKey)){
@@ -284,14 +325,14 @@ document.getElementById("dismissBanner").addEventListener("click", ()=>{
 });
 
 function startListeners(){
-  if(!usersListenerStarted && currentUser.role === "admin"){
+  if(!usersListenerStarted && userHasAnyRole("admin")){
     usersListenerStarted = true;
     db.collection("users").onSnapshot(snap=>{
       usersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
       renderUsers();
     });
   }
-  if(currentUser.role === "admin"){
+  if(userHasAnyRole("warehouse")){
     if(!tireListenersStarted){ tireListenersStarted = true; startTireListeners(); }
     if(!kybListenersStarted){ kybListenersStarted = true; startKybListeners(); }
   } else if(currentCategory === "kyb"){
@@ -343,7 +384,7 @@ function startTireListeners(){
     txnCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
     renderTxns();
   }, "tire transactions");
-  if(currentUser.role === "admin"){
+  if(userHasAnyRole("warehouse")){
     db.collection("orders").where("status","==","pending").onSnapshot(snap=>{
       ordersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
       renderOrders();
@@ -384,7 +425,7 @@ function startKybListeners(){
     kybTxnCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
     renderKybTxns();
   }, "kyb transactions");
-  if(currentUser.role === "admin"){
+  if(userHasAnyRole("warehouse")){
     db.collection("kybOrders").where("status","==","pending").onSnapshot(snap=>{
       kybOrdersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
       renderKybOrders();
