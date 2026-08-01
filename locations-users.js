@@ -38,29 +38,18 @@ function renderUsers(){
     <td>${escapeHtml(u.username)}</td>
     <td>${u.role==='admin'?'管理者':'員工'}</td>
     <td><span class="badge ${u.active!==false?'on':'off'}">${u.active!==false?'啟用':'停用'}</span></td>
-    <td class="pw-cell" data-id="${u.id}" style="cursor:pointer;text-decoration:underline dotted;">${escapeHtml(u.pwNote||"未填")}</td>
     <td>
       <button data-toggle="${u.id}" data-active="${u.active!==false}">${u.active!==false?'停用':'啟用'}</button>
       <button data-edit="${u.id}">編輯</button>
       <button data-del="${u.id}" data-name="${escapeHtml(u.name)}">刪除</button>
     </td>
-  </tr>`).join("") || `<tr><td colspan="6" class="empty">尚無使用者</td></tr>`;
+  </tr>`).join("") || `<tr><td colspan="5" class="empty">尚無使用者</td></tr>`;
   body.querySelectorAll("[data-toggle]").forEach(b=>b.addEventListener("click", ()=>{
     const newActive = b.dataset.active !== "true";
     db.collection("users").doc(b.dataset.toggle).update({active:newActive});
   }));
   body.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click", ()=> editUser(b.dataset.edit)));
   body.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click", ()=> deleteUser(b.dataset.del, b.dataset.name)));
-  body.querySelectorAll(".pw-cell").forEach(td=>td.addEventListener("click", ()=> editPwNote(td.dataset.id)));
-}
-
-function editPwNote(uid){
-  const u = usersCache.find(x=>x.id===uid);
-  if(!u) return;
-  const input = prompt("密碼備註（僅供你自己回頭查看用，不是即時同步的真正密碼，員工自行改密碼後這裡不會自動更新）：", u.pwNote||"");
-  if(input === null) return;
-  db.collection("users").doc(uid).update({ pwNote: input.trim() || null })
-    .catch(e=>alert("更新失敗："+e.message));
 }
 
 function editUser(uid){
@@ -95,7 +84,6 @@ document.getElementById("changePwBtn").addEventListener("click", async ()=>{
     const cred = firebase.auth.EmailAuthProvider.credential(email, oldPw);
     await auth.currentUser.reauthenticateWithCredential(cred);
     await auth.currentUser.updatePassword(newPw);
-    await db.collection("users").doc(currentUser.uid).update({ pwNote: newPw }).catch(()=>{});
     alert("密碼修改成功，下次登入請用新密碼。");
   }catch(e){
     alert("修改失敗：" + (e.code==='auth/wrong-password' ? "目前密碼輸入錯誤" : e.message));
@@ -111,6 +99,7 @@ function openNewUserModal(){
     <div class="form-row"><label>角色</label>
       <select id="newUserRole"><option value="member">員工</option><option value="admin">管理者</option></select>
     </div>
+    <div class="note">初始密碼請當面或用其他管道告知員工，系統不會保存明文密碼，事後也無法查回。忘記密碼請用「刪除」後重新建立帳號，或請該員工自行用「改密碼」設定新密碼。</div>
     <div class="form-actions">
       <button onclick="closeModal()">取消</button>
       <button class="primary" id="newUserSubmitBtn">建立帳號</button>
@@ -125,7 +114,7 @@ function openNewUserModal(){
     const email = uname + "@" + INTERNAL_EMAIL_DOMAIN;
     try{
       const cred = await secondaryAuth.createUserWithEmailAndPassword(email, pw);
-      await db.collection("users").doc(cred.user.uid).set({name, username:uname, role, active:true, pwNote: pw});
+      await db.collection("users").doc(cred.user.uid).set({name, username:uname, role, active:true});
       await secondaryAuth.signOut();
       closeModal();
     }catch(e){
