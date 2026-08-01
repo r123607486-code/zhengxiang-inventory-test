@@ -19,7 +19,11 @@ async function exportFullBackup(){
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows,{header:["id","資料_JSON"]}), sheet);
     }));
     const users = await db.collection("users").get();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users.docs.map(d=>{const u=d.data()||{}; return {id:d.id,帳號:u.username||"",姓名:u.name||"",角色:u.role||"",啟用:u.active!==false};}),{header:["id","帳號","姓名","角色","啟用"]}), "交接_使用者設定");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users.docs.map(d=>{
+      const u=d.data()||{};
+      const roles = Array.isArray(u.roles) && u.roles.length ? u.roles : (u.role==='admin' ? ['admin'] : ['sales','warehouse']);
+      return {id:d.id,帳號:u.username||"",姓名:u.name||"",角色:userRolesLabel(roles),啟用:u.active!==false};
+    }),{header:["id","帳號","姓名","角色","啟用"]}), "交接_使用者設定");
     XLSX.writeFile(wb, `完整交接備份_${todayStr()}.xlsx`);
   }catch(e){ alert("完整交接備份失敗："+e.message); }
 }
