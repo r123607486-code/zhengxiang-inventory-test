@@ -127,6 +127,7 @@ function renderMaster(){
   document.getElementById("masterCount").textContent = `共 ${list.length} 筆`
     + (masterExpireYears ? `　（反紅門檻：超過 ${masterExpireYears} 年）` : "");
 
+  const canManage = userHasAnyRole("warehouse");
   const body = document.getElementById("masterBody");
   body.innerHTML = list.map(it=>{
     const details = locDetailList(it).map(d=>{
@@ -148,17 +149,17 @@ function renderMaster(){
       <td>${escapeHtml(it.spec)}</td>
       <td>${totalQty(it)}</td>
       <td class="loc-detail-cell">${locHtml}</td>
-      <td class="twenty-cell${currentUser.role==='admin'?' editable-cell':''}" data-id="${it.id}">${it.twenty!=null?it.twenty:"未填"}</td>
-      <td class="price-cell${currentUser.role==='admin'?' editable-cell':''}" data-id="${it.id}">${it.sellPrice!=null?it.sellPrice:"未填"}</td>
+      <td class="twenty-cell${canManage?' editable-cell':''}" data-id="${it.id}">${it.twenty!=null?it.twenty:"未填"}</td>
+      <td class="price-cell${canManage?' editable-cell':''}" data-id="${it.id}">${it.sellPrice!=null?it.sellPrice:"未填"}</td>
       <td>${escapeHtml(it.remark||"")}</td>
-      <td>${currentUser.role==='admin' ? `<button data-del="${it.id}" data-label="${escapeHtml(it.brand)} ${escapeHtml(it.spec)}">刪除</button>` : ""}</td>
+      <td>${canManage ? `<button data-del="${it.id}" data-label="${escapeHtml(it.brand)} ${escapeHtml(it.spec)}">刪除</button>` : ""}</td>
     </tr>`;
   }).join("") || `<tr><td colspan="9" class="empty">尚無資料</td></tr>`;
 
   body.querySelectorAll(".loc-line").forEach(el=>{
     el.addEventListener("click", ()=> openLocationModal(el.dataset.id, el.dataset.code, Number(el.dataset.idx)));
   });
-  if(currentUser.role === "admin"){
+  if(canManage){
     body.querySelectorAll(".twenty-cell").forEach(td=>{
       td.addEventListener("click", ()=> editTwenty(td.dataset.id));
     });
@@ -174,7 +175,7 @@ function renderMaster(){
 }
 
 function deleteItem(itemId, label){
-  if(currentUser.role !== "admin") return;
+  if(!userHasAnyRole("warehouse")) return;
   const item = itemsCache.find(i=>i.id===itemId);
   if(!item) return;
   const qty = totalQty(item);
@@ -260,7 +261,7 @@ function openLocationModal(itemId, code, idx){
 }
 
 function editTwenty(itemId){
-  if(currentUser.role !== "admin") return;
+  if(!userHasAnyRole("warehouse")) return;
   const item = itemsCache.find(i=>i.id===itemId);
   if(!item) return;
   const cur = item.twenty!=null ? String(item.twenty) : "";
@@ -277,7 +278,7 @@ function editTwenty(itemId){
 }
 
 function editSellPrice(itemId){
-  if(currentUser.role !== "admin") return;
+  if(!userHasAnyRole("warehouse")) return;
   const item = itemsCache.find(i=>i.id===itemId);
   if(!item) return;
   const cur = item.sellPrice!=null ? String(item.sellPrice) : "";
