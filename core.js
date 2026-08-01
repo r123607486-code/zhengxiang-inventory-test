@@ -45,6 +45,40 @@ function userHasAnyRole(...need){
   return need.some(r=>roles.includes(r));
 }
 
+// 商品類別與價目表：先用固定模板（輪胎、KYB 各一組），取代原本 20%/售價/保修廠價/一線消費者售價
+// 各自寫死在畫面與匯出程式碼裡的做法。欄位名稱（key）維持跟資料庫既有欄位一致，不搬動既有資料；
+// 之後如果要支援更多商品類別或自訂欄位，只要在這裡加一組模板，不用再複製整套渲染／編輯／匯出邏輯。
+// 尚未包含「價目表 × 客戶類型」的完整版本（那個規模更大，屬於之後的批次）。
+const PRICE_TEMPLATES = {
+  tire: [
+    {key:"twenty", label:"20%"},
+    {key:"sellPrice", label:"售價"}
+  ],
+  kyb: [
+    {key:"warrantyPrice", label:"保修廠價"},
+    {key:"catalogPrice", label:"一線消費者售價"}
+  ]
+};
+// 通用的「點格子編輯單一價格欄位」函式：collectionName 是 Firestore collection 名稱，
+// cache 是對應的品項快取陣列（itemsCache 或 kybItemsCache），field/label 來自 PRICE_TEMPLATES。
+function editPriceField(collectionName, cache, itemId, field, label){
+  if(!userHasAnyRole("warehouse")) return;
+  const item = cache.find(i=>i.id===itemId);
+  if(!item) return;
+  const cur = item[field]!=null ? String(item[field]) : "";
+  const input = prompt(`輸入${label}金額（純數字）`, cur);
+  if(input === null) return;
+  const val = input.trim();
+  const update = {};
+  if(val === ""){ update[field] = null; }
+  else{
+    const num = Number(val);
+    if(isNaN(num)){ alert("請輸入數字"); return; }
+    update[field] = num;
+  }
+  db.collection(collectionName).doc(itemId).update(update).catch(e=>alert("更新失敗："+e.message));
+}
+
 let currentUser = null;
 let currentCategory = null;
 let itemsCache = [];
