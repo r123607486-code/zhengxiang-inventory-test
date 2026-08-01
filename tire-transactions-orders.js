@@ -69,6 +69,7 @@ function openTxnModal(){
       <select id="txnLoc"><option value="">請先選擇品項</option></select>
     </div>
     <div class="form-row" id="txnProdDateRow"><label>生產日期（選填，這批的4碼DOT代碼，例如2523；只有進貨才需要）</label><input type="text" id="txnProdDate" placeholder="例如 2523"></div>
+    <div class="form-row" id="txnCostRow"><label>進價（選填，每單位成本，只有進貨才需要；用於未來計算毛利，目前不會顯示在任何報表）</label><input type="number" id="txnCost" min="0" step="0.01" placeholder="例如 1200"></div>
     <div class="form-actions">
       <button onclick="closeModal()">取消</button>
       <button class="primary" id="txnSubmitBtn">確認送出</button>
@@ -81,11 +82,15 @@ function openTxnModal(){
     const locSelect = document.getElementById("txnLoc");
     const it = itemsCache.find(i=>i.id===selectedItemId);
     const prodDateRow = document.getElementById("txnProdDateRow");
+    const costRow = document.getElementById("txnCostRow");
     if(type === "out"){
       prodDateRow.classList.add("hidden");
       document.getElementById("txnProdDate").value = "";
+      costRow.classList.add("hidden");
+      document.getElementById("txnCost").value = "";
     } else {
       prodDateRow.classList.remove("hidden");
+      costRow.classList.remove("hidden");
     }
     if(!it){ locSelect.innerHTML = `<option value="">請先選擇品項</option>`; window._txnOutOptions = []; return; }
     if(type === "out"){
@@ -139,8 +144,10 @@ function openTxnModal(){
       if(!loc){ alert("請選擇儲位"); return; }
       batchDate = document.getElementById("txnProdDate").value.trim() || null;
     }
+    const costInput = document.getElementById("txnCost").value;
+    const unitCost = (type === "in" && costInput !== "") ? Number(costInput) : null;
     try{
-      await submitTxn(selectedItemId, type, qty, loc, batchDate);
+      await submitTxn(selectedItemId, type, qty, loc, batchDate, unitCost);
     }catch(e){
       console.error("輪胎進銷貨送出失敗：", e);
       alert("送出失敗：" + (e.message || "資料庫拒絕寫入。請聯絡管理者確認 Firebase 權限。"));
@@ -148,7 +155,7 @@ function openTxnModal(){
   });
 }
 
-async function submitTxn(itemId, type, qty, loc, batchDate){
+async function submitTxn(itemId, type, qty, loc, batchDate, unitCost){
   const itemRef = db.collection("items").doc(itemId);
   const itemSnap = await itemRef.get();
   const item = itemSnap.data();
@@ -185,6 +192,7 @@ async function submitTxn(itemId, type, qty, loc, batchDate){
   await itemRef.update({locations: allLocs});
   await db.collection("transactions").add({
     itemId, type, qty, loc, batchDate: usedDate, date: todayStr(), operator: currentUser.name, editLog: [],
+    unitCost: (type === "in" && unitCost != null && Number.isFinite(unitCost)) ? unitCost : null,
     createdAt: new Date().toISOString()
   });
   await refreshTireViews();
