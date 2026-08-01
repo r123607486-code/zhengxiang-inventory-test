@@ -6,7 +6,7 @@ function openErpPrintPreview(order,invoice){
   const old=document.getElementById("erpPrintOverlay");if(old)old.remove();
   const isInvoice=!!invoice;
   const customerName=isInvoice?invoice.customerName:order.customerName;
-  const customer=erpCustomersCache.find(c=>(isInvoice?invoice.customerId:order.customerId)&&c.id===(isInvoice?invoice.customerId:order.customerId));
+  const customer=erpPartiesCache.find(c=>(isInvoice?invoice.customerId:order.customerId)&&c.id===(isInvoice?invoice.customerId:order.customerId));
   const lines=isInvoice?invoice.lines||[]:erpOrderLines(order).map(l=>({itemName:l.itemName,quantity:l.quantity,unitPrice:l.unitPrice,subtotalAmount:(Number(l.quantity)||0)*(Number(l.unitPrice)||0)}));
   const totals=isInvoice?{subtotal:Number(invoice.subtotalAmount)||0,taxAmount:Number(invoice.taxAmount)||0,totalAmount:Number(invoice.totalAmount)||0}:erpDisplayTotals(order);
   const docNo=isInvoice?invoice.invoiceNo:order.orderNo;
