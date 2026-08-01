@@ -67,6 +67,7 @@ function openKybTxnModal(){
     <div class="form-row"><label>儲位</label>
       <select id="kybTxnLoc"><option value="">請先選擇車型</option></select>
     </div>
+    <div class="form-row" id="kybTxnCostRow"><label>進價（選填，每單位成本，只有進貨才需要；用於未來計算毛利，目前不會顯示在任何報表）</label><input type="number" id="kybTxnCost" min="0" step="0.01" placeholder="例如 1500"></div>
     <div class="form-actions">
       <button onclick="closeModal()">取消</button>
       <button class="primary" id="kybTxnSubmitBtn">確認送出</button>
@@ -78,6 +79,13 @@ function openKybTxnModal(){
     const type = document.getElementById("kybTxnType").value;
     const locSelect = document.getElementById("kybTxnLoc");
     const it = kybItemsCache.find(i=>i.id===selectedItemId);
+    const costRow = document.getElementById("kybTxnCostRow");
+    if(type === "out"){
+      costRow.classList.add("hidden");
+      document.getElementById("kybTxnCost").value = "";
+    } else {
+      costRow.classList.remove("hidden");
+    }
     if(!it){ locSelect.innerHTML = `<option value="">請先選擇車型</option>`; return; }
     if(type === "out"){
       const options = kybLocList(it);
@@ -127,8 +135,10 @@ function openKybTxnModal(){
       loc = document.getElementById("kybTxnLoc").value;
       if(!loc){ alert("請選擇儲位"); return; }
     }
+    const costInput = document.getElementById("kybTxnCost").value;
+    const unitCost = (type === "in" && costInput !== "") ? Number(costInput) : null;
     try{
-      await submitKybTxn(selectedItemId, type, qty, loc);
+      await submitKybTxn(selectedItemId, type, qty, loc, unitCost);
     }catch(e){
       console.error("KYB 進銷貨送出失敗：", e);
       alert("送出失敗：" + (e.message || "資料庫拒絕寫入。請聯絡管理者確認 Firebase 權限。"));
@@ -136,7 +146,7 @@ function openKybTxnModal(){
   });
 }
 
-async function submitKybTxn(itemId, type, qty, loc){
+async function submitKybTxn(itemId, type, qty, loc, unitCost){
   const itemRef = db.collection("kybItems").doc(itemId);
   const itemSnap = await itemRef.get();
   const item = itemSnap.data();
@@ -148,6 +158,7 @@ async function submitKybTxn(itemId, type, qty, loc){
   await itemRef.update({locations: allLocs});
   await db.collection("kybTransactions").add({
     itemId, type, qty, loc, date: todayStr(), operator: currentUser.name, editLog: [],
+    unitCost: (type === "in" && unitCost != null && Number.isFinite(unitCost)) ? unitCost : null,
     createdAt: new Date().toISOString()
   });
   await refreshKybViews();
