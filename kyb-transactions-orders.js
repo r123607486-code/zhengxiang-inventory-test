@@ -208,6 +208,7 @@ function openEditKybTxnModal(txnId){
 }
 
 async function saveEditKybTxn(t, next){
+  if(stockReservationsCache.some(r=>r.status==="active" && r.source==="kyb" && r.itemId===t.itemId)) throw new Error("此車型目前有有效預留；請先由管理者釋放預留，再修改舊進銷貨紀錄。");
   const itemRef = db.collection("kybItems").doc(t.itemId);
   const itemSnap = await itemRef.get();
   if(itemSnap.exists){
@@ -246,6 +247,7 @@ async function saveEditKybTxn(t, next){
 async function deleteKybTxn(txnId){
   const t = kybTxnCache.find(x=>x.id===txnId);
   if(!t) return;
+  if(stockReservationsCache.some(r=>r.status==="active" && r.source==="kyb" && r.itemId===t.itemId)){ alert("此車型目前有有效預留；請先由管理者釋放預留，再刪除舊進銷貨紀錄。"); return; }
   if(!confirm("確定要刪除這筆紀錄嗎？（會自動把庫存改回去）")) return;
   const itemRef = db.collection("kybItems").doc(t.itemId);
   const itemSnap = await itemRef.get();
@@ -520,4 +522,76 @@ function deleteKybLocation(locId, code){
   if(confirm(`確定要刪除儲位「${code}」嗎？`)){
     db.collection("kybLocations").doc(locId).delete();
   }
+}
+
+
+// ===== 第 5 批：KYB 預留釋放、取消與確認出貨 =====
+function renderKybOrders(){
+  const body=document.getElementById("kybOrdersBody");if(!body)return;document.getElementById("kybOrdersCount").textContent=`共 ${kybOrdersCache.length} 筆待確認`;
+  const sorted=kybOrdersCache.slice().sort((a,b)=>(a.requestedAt||"").localeCompare(b.requestedAt||""));
+  body.innerHTML=sorted.map(o=>`<tr><td>${escapeHtml((o.requestedAt||"").slice(0,16).replace("T"," "))}</td><td>${escapeHtml(o.requestedByName||"")}</td><td>${escapeHtml(o.itemLabel||"")}</td><td>${o.qty}</td><td>${o.loc?`${escapeHtml(o.loc)}<br><small>${escapeHtml(reservationStateLabel(o))}</small>`:'<span class="empty-inline">未選</span>'}</td><td>${escapeHtml(o.customerName||"")}</td><td>${escapeHtml(o.customerContact||"")}</td><td>${escapeHtml(o.customerNote||"")}</td><td><button data-confirm="${o.id}">確認</button><button data-edit="${o.id}">修改</button>${userHasAnyRole("admin")&&o.reservationStatus==="active"?`<button data-release="${o.id}">釋放預留</button>`:''}<button data-cancel="${o.id}">取消</button></td></tr>`).join("")||`<tr><td colspan="9" class="empty">目前沒有待確認訂單</td></tr>`;
+  body.querySelectorAll("[data-confirm]").forEach(b=>b.addEventListener("click",()=>openConfirmKybOrderModal(b.dataset.confirm)));body.querySelectorAll("[data-edit]").forEach(b=>b.addEventListener("click",()=>openEditKybOrderModal(b.dataset.edit)));body.querySelectorAll("[data-release]").forEach(b=>b.addEventListener("click",()=>releaseKybReservation(b.dataset.release,"管理者手動釋放")));body.querySelectorAll("[data-cancel]").forEach(b=>b.addEventListener("click",()=>cancelKybOrder(b.dataset.cancel)));
+}
+function renderKybMyOrders(){
+  const body=document.getElementById("kybMyOrdersBody");if(!body)return;const sorted=kybMyOrdersCache.slice().sort((a,b)=>(b.requestedAt||"").localeCompare(a.requestedAt||""));document.getElementById("kybMyOrdersCount").textContent=`共 ${sorted.length} 筆`;
+  const statusLabel={pending:"待確認",confirmed:"已出貨",cancelled:"已取消"};body.innerHTML=sorted.map(o=>`<tr><td>${escapeHtml((o.requestedAt||"").slice(0,16).replace("T"," "))}</td><td>${escapeHtml(o.itemLabel||"")}</td><td>${o.qty}</td><td>${escapeHtml(o.customerName||"")}</td><td>${statusLabel[o.status]||o.status}<br><small>${escapeHtml(reservationStateLabel(o))}</small></td><td>${o.status==="pending"?`<button data-cancel-own="${o.id}">取消叫貨</button>`:''}</td></tr>`).join("")||`<tr><td colspan="6" class="empty">尚無訂單紀錄</td></tr>`;body.querySelectorAll("[data-cancel-own]").forEach(b=>b.addEventListener("click",()=>cancelKybOrder(b.dataset.cancelOwn)));
+}
+async function releaseKybReservation(orderId,reason){
+  if(!confirm("確定要釋放這筆訂單的庫存預留嗎？訂單會保留為待確認，但數量將重新開放給其他叫貨。"))return;
+  try{await db.runTransaction(async tx=>{const orderRef=db.collection("kybOrders").doc(orderId),orderSnap=await tx.get(orderRef);if(!orderSnap.exists)throw new Error("找不到訂單");const order=orderSnap.data();if(!order.reservationId)throw new Error("這是舊訂單，沒有可釋放的預留");const resRef=db.collection("stockReservations").doc(order.reservationId),resSnap=await tx.get(resRef);if(!resSnap.exists||resSnap.data().status!=="active")throw new Error("這筆預留已經不是啟用狀態");const now=new Date().toISOString();tx.update(resRef,{status:"released",releasedAt:now,releasedBy:currentUser.name,releaseReason:reason});tx.update(orderRef,{reservationStatus:"released",reservationReleasedAt:now,reservationReleasedBy:currentUser.name});});}catch(e){alert("釋放失敗："+e.message);}
+}
+async function cancelKybOrder(orderId){
+  if(!confirm("確定要取消這筆訂單嗎？若仍有預留量，會同時釋放。"))return;
+  try{await db.runTransaction(async tx=>{const orderRef=db.collection("kybOrders").doc(orderId),orderSnap=await tx.get(orderRef);if(!orderSnap.exists)throw new Error("找不到訂單");const order=orderSnap.data();if(order.status!=="pending")throw new Error("只有待確認訂單可以取消");let resRef=null,resSnap=null;if(order.reservationId){resRef=db.collection("stockReservations").doc(order.reservationId);resSnap=await tx.get(resRef);}const now=new Date().toISOString();if(resSnap&&resSnap.exists&&resSnap.data().status==="active")tx.update(resRef,{status:"released",releasedAt:now,releasedBy:currentUser.name,releaseReason:"訂單取消"});tx.update(orderRef,{status:"cancelled",cancelledAt:now,cancelledBy:currentUser.name,reservationStatus:resSnap&&resSnap.exists&&resSnap.data().status==="active"?"released":order.reservationStatus||null});});}catch(e){alert("取消失敗："+e.message);}
+}
+async function confirmKybOrder(order,loc){
+  return db.runTransaction(async tx=>{const orderRef=db.collection("kybOrders").doc(order.id),itemRef=db.collection("kybItems").doc(order.itemId),orderSnap=await tx.get(orderRef),itemSnap=await tx.get(itemRef);if(!orderSnap.exists||!itemSnap.exists)throw new Error("訂單或車型已不存在");const liveOrder=orderSnap.data();if(liveOrder.status!=="pending")throw new Error("這筆訂單已不是待確認狀態");let oldResRef=null,oldResSnap=null;if(liveOrder.reservationId){oldResRef=db.collection("stockReservations").doc(liveOrder.reservationId);oldResSnap=await tx.get(oldResRef);}const key=makeReservationKey("kyb",liveOrder.itemId,loc,null),keyedReservations=await tx.get(db.collection("stockReservations").where("reservationKey","==",key));const otherReserved=keyedReservations.docs.reduce((sum,d)=>{const r=d.data();return sum+(r.status==="active"&&d.id!==liveOrder.reservationId?(Number(r.qty)||0):0);},0);const item={id:liveOrder.itemId,...itemSnap.data()},physical=kybLocQty((item.locations||{})[loc]);if(liveOrder.qty>physical-otherReserved)throw new Error(`這個儲位可用庫存只剩 ${Math.max(0,physical-otherReserved)}，請改選其他儲位`);const allLocs={...(item.locations||{})},next=physical-liveOrder.qty;if(next>0)allLocs[loc]=next;else delete allLocs[loc];const now=new Date().toISOString(),txnRef=db.collection("kybTransactions").doc();tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId:liveOrder.itemId,type:"out",qty:liveOrder.qty,loc,date:todayStr(),operator:currentUser.name,salesperson:liveOrder.requestedByName||"",customerName:liveOrder.customerName||"",customerContact:liveOrder.customerContact||"",customerNote:liveOrder.customerNote||"",orderId:order.id,reservationId:liveOrder.reservationId||null,editLog:[],createdAt:now});if(oldResSnap&&oldResSnap.exists&&oldResSnap.data().status==="active")tx.update(oldResRef,{status:"consumed",consumedAt:now,consumedBy:currentUser.name,fulfilledLoc:loc});tx.update(orderRef,{status:"confirmed",confirmedAt:now,confirmedBy:currentUser.name,linkedTxnId:txnRef.id,reservationStatus:oldResSnap&&oldResSnap.exists&&oldResSnap.data().status==="active"?"consumed":liveOrder.reservationStatus||null});return txnRef;});
+}
+function openConfirmKybOrderModal(orderId){
+  const order=kybOrdersCache.find(o=>o.id===orderId);if(!order)return;const item=kybItemsCache.find(i=>i.id===order.itemId);if(!item){alert("找不到車型");return;}const options=kybLocList(item).map(o=>({...o,available:kybAvailableAt(item,o.code,order.reservationId)})).filter(o=>o.available>0);if(!options.length){alert("目前沒有可出貨的可用庫存；可先由管理者釋放其他預留或取消訂單。");return;}let defaultIdx=options.findIndex(o=>o.code===order.loc);if(defaultIdx<0)defaultIdx=0;const html=`<div class="sheet-head"><h2>確認出貨：${escapeHtml(order.itemLabel||"")}</h2><button class="sheet-close" onclick="closeModal()">✕</button></div><div class="form-row"><label>客戶</label><input type="text" value="${escapeHtml(order.customerName||"")}（${escapeHtml(order.customerContact||"")}）" disabled></div><div class="form-row"><label>數量</label><input type="text" value="${order.qty}" disabled></div><div class="form-row"><label>出貨儲位</label><select id="kybConfirmLoc">${options.map((o,i)=>`<option value="${i}" ${i===defaultIdx?"selected":""}>${escapeHtml(o.code)}（庫存 ${o.qty}／可用 ${o.available}）</option>`).join("")}</select></div><div class="count" id="kybConfirmStockWarn" style="color:#a31e22;"></div><div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="kybConfirmOrderSubmitBtn">確認出貨</button></div>`;openModal(html);const refresh=()=>{const o=options[Number(document.getElementById("kybConfirmLoc").value)];document.getElementById("kybConfirmStockWarn").textContent=o&&order.qty>o.available?`⚠ 可用量只有 ${o.available}，不足出貨 ${order.qty}`:"";};document.getElementById("kybConfirmLoc").addEventListener("change",refresh);refresh();document.getElementById("kybConfirmOrderSubmitBtn").addEventListener("click",async()=>{const opt=options[Number(document.getElementById("kybConfirmLoc").value)];if(!opt||order.qty>opt.available){alert("可用庫存不足，請重新選擇");return;}try{await confirmKybOrder(order,opt.code);closeModal();}catch(e){alert("確認失敗："+e.message);}});
+}
+
+
+// ===== 第 5 批：倉管修改 KYB 訂單時，同步重算預留 =====
+async function saveKybOrderEdit(order,change){
+  await db.runTransaction(async tx=>{
+    const orderRef=db.collection("kybOrders").doc(order.id),itemRef=db.collection("kybItems").doc(change.itemId);
+    const orderSnap=await tx.get(orderRef),itemSnap=await tx.get(itemRef);if(!orderSnap.exists||!itemSnap.exists)throw new Error("訂單或車型已不存在");
+    const live=orderSnap.data();if(live.status!=="pending")throw new Error("只有待確認訂單可以修改");
+    let oldRef=null,oldSnap=null;if(live.reservationId){oldRef=db.collection("stockReservations").doc(live.reservationId);oldSnap=await tx.get(oldRef);}
+    const key=makeReservationKey("kyb",change.itemId,change.loc,null),matched=await tx.get(db.collection("stockReservations").where("reservationKey","==",key));
+    const others=matched.docs.reduce((sum,d)=>{const r=d.data();return sum+(r.status==="active"&&d.id!==live.reservationId?(Number(r.qty)||0):0);},0);
+    const actual=kybLocQty((itemSnap.data().locations||{})[change.loc]);if(change.qty>actual-others)throw new Error(`新選擇的可用庫存只有 ${Math.max(0,actual-others)}，無法預留 ${change.qty}`);
+    const now=new Date().toISOString(),sameKey=oldSnap&&oldSnap.exists&&oldSnap.data().reservationKey===key&&oldSnap.data().status==="active";let reservationRef=oldRef;
+    if(sameKey)tx.update(oldRef,{qty:change.qty,updatedAt:now,updatedBy:currentUser.name});else{if(oldSnap&&oldSnap.exists&&oldSnap.data().status==="active")tx.update(oldRef,{status:"released",releasedAt:now,releasedBy:currentUser.name,releaseReason:"倉管修改訂單"});reservationRef=db.collection("stockReservations").doc();tx.set(reservationRef,{source:"kyb",orderId:order.id,itemId:change.itemId,loc:change.loc,batchDate:null,qty:change.qty,reservationKey:key,status:"active",reservedByUid:live.requestedByUid||"",reservedByName:live.requestedByName||"",createdAt:now,createdBy:currentUser.name});}
+    tx.update(orderRef,{...change,reservationId:reservationRef.id,reservationStatus:"active",updatedAt:now,updatedBy:currentUser.name});
+  });
+}
+function openEditKybOrderModal(orderId){
+  const order=kybOrdersCache.find(o=>o.id===orderId);if(!order)return;let selectedItemId=order.itemId,locOptions=[];
+  const html=`<div class="sheet-head"><h2>修改訂單與預留</h2><button class="sheet-close" onclick="closeModal()">✕</button></div><div class="form-row"><label>搜尋車型（需要換車型才輸入）</label><input type="text" id="editKybOrderItemSearch" placeholder="例如 Altis"><div class="autocomplete-list hidden" id="editKybOrderItemList"></div></div><div class="form-row"><label>目前車型</label><input type="text" id="editKybOrderItemLabel" value="${escapeHtml(order.itemLabel||'')}" disabled></div><div class="form-row"><label>預留儲位</label><select id="editKybOrderLoc"></select></div><div class="form-row"><label>數量</label><input type="number" id="editKybOrderQty" min="1" value="${order.qty}"></div><div class="form-row"><label>客戶姓名</label><input type="text" id="editKybOrderCustomerName" value="${escapeHtml(order.customerName||'')}"></div><div class="form-row"><label>聯絡方式</label><input type="text" id="editKybOrderCustomerContact" value="${escapeHtml(order.customerContact||'')}"></div><div class="form-row"><label>備註</label><input type="text" id="editKybOrderCustomerNote" value="${escapeHtml(order.customerNote||'')}"></div><div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="editKybOrderSaveBtn">儲存並重新預留</button></div>`;
+  openModal(html);
+  const renderLocs=()=>{const item=kybItemsCache.find(i=>i.id===selectedItemId);locOptions=item?kybLocList(item).map(o=>({...o,available:kybAvailableAt(item,o.code,order.reservationId)})).filter(o=>o.available>0):[];const select=document.getElementById("editKybOrderLoc");if(!locOptions.length){select.innerHTML='<option value="">目前沒有可用庫存</option>';return;}let selected=locOptions.findIndex(o=>o.code===order.loc);if(selected<0)selected=0;select.innerHTML=locOptions.map((o,i)=>`<option value="${i}" ${i===selected?"selected":""}>${escapeHtml(o.code)}（庫存 ${o.qty}／可用 ${o.available}）</option>`).join("");};
+  renderLocs();
+  const search=document.getElementById("editKybOrderItemSearch");search.addEventListener("input",()=>{const q=norm(search.value),list=document.getElementById("editKybOrderItemList");if(!q){list.classList.add("hidden");return;}const matches=kybItemsCache.filter(it=>norm(it.carModel).includes(q)).slice(0,15);list.innerHTML=matches.map(it=>`<div data-id="${it.id}">${escapeHtml(kybItemLabel(it))}</div>`).join("");list.classList.toggle("hidden",matches.length===0);list.querySelectorAll("div").forEach(d=>d.addEventListener("click",()=>{selectedItemId=d.dataset.id;const it=kybItemsCache.find(x=>x.id===selectedItemId);document.getElementById("editKybOrderItemLabel").value=kybItemLabel(it);list.classList.add("hidden");search.value="";renderLocs();}));});
+  document.getElementById("editKybOrderSaveBtn").addEventListener("click",async()=>{const qty=Number(document.getElementById("editKybOrderQty").value),opt=locOptions[Number(document.getElementById("editKybOrderLoc").value)],item=kybItemsCache.find(i=>i.id===selectedItemId);const customerName=document.getElementById("editKybOrderCustomerName").value.trim(),customerContact=document.getElementById("editKybOrderCustomerContact").value.trim(),customerNote=document.getElementById("editKybOrderCustomerNote").value.trim();if(!item||!opt||!qty||qty<=0){alert("請選擇有可用量的車型、儲位與數量");return;}if(!customerName){alert("請輸入客戶姓名");return;}try{await saveKybOrderEdit(order,{itemId:item.id,itemLabel:`${item.carModel}（KYB）`,qty,loc:opt.code,customerName,customerContact,customerNote});closeModal();}catch(e){alert("儲存失敗："+e.message);}});
+}
+
+
+// 第 5 批：KYB 庫存異動出貨不得吃掉已預留數量
+async function submitKybTxn(itemId,type,qty,loc,unitCost){
+  const itemRef=db.collection("kybItems").doc(itemId);
+  await db.runTransaction(async tx=>{
+    const itemSnap=await tx.get(itemRef);if(!itemSnap.exists)throw new Error("找不到車型");
+    const item=itemSnap.data(),allLocs={...(item.locations||{})},current=kybLocQty(allLocs[loc]);
+    if(type==="out"){
+      const resSnap=await tx.get(db.collection("stockReservations").where("reservationKey","==",makeReservationKey("kyb",itemId,loc,null)));
+      const reserved=resSnap.docs.reduce((s,d)=>{const r=d.data();return s+(r.status==="active"?(Number(r.qty)||0):0);},0),available=current-reserved;
+      if(qty>available)throw new Error(`可用庫存只有 ${Math.max(0,available)}，不能扣除已預留數量`);
+    }
+    const next=type==="in"?current+qty:current-qty;if(next<0)throw new Error("庫存不足，無法出貨");if(next>0)allLocs[loc]=next;else delete allLocs[loc];
+    const now=new Date().toISOString(),txnRef=db.collection("kybTransactions").doc();
+    tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId,type,qty,loc,date:todayStr(),operator:currentUser.name,editLog:[],unitCost:(type==="in"&&unitCost!=null&&Number.isFinite(unitCost))?unitCost:null,createdAt:now});
+  });
+  await refreshKybViews();closeModal();
 }

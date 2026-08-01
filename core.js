@@ -521,3 +521,136 @@ function updateOrdersBannerCombined(){
   banner.dataset.targetCategory = otherN > 0 ? otherCategory : currentCategory;
   banner.classList.remove("hidden");
 }
+
+
+// ===== 第 5 批：庫存預留 / 可用量（輪胎與 KYB 共用）=====
+let stockReservationsCache = [];
+let reservationsListenerStarted = false;
+
+function makeReservationKey(source, itemId, loc, batchDate){
+  return [source, itemId || "", loc || "", batchDate || ""].join("::");
+}
+function activeReservationForOrder(orderId){
+  return stockReservationsCache.find(r=>r.orderId===orderId && r.status==="active") || null;
+}
+function activeReservedQty(source, itemId, loc, batchDate, excludeReservationId){
+  const key = makeReservationKey(source, itemId, loc, batchDate);
+  return stockReservationsCache.reduce((sum, r)=>{
+    if(r.status!=="active" || r.reservationKey!==key || r.id===excludeReservationId) return sum;
+    return sum + (Number(r.qty)||0);
+  }, 0);
+}
+function tireStockAt(item, loc, batchDate){
+  return normalizeBatches((item.locations||{})[loc], item)
+    .filter(b=>(b.productionDate||null)===(batchDate||null))
+    .reduce((sum,b)=>sum+(Number(b.qty)||0),0);
+}
+function tireAvailableAt(item, loc, batchDate, excludeReservationId){
+  return Math.max(0, tireStockAt(item, loc, batchDate) -
+    activeReservedQty("tire", item.id, loc, batchDate, excludeReservationId));
+}
+function tireReservedTotal(item){
+  return stockReservationsCache.reduce((sum,r)=>sum+(r.status==="active" && r.source==="tire" && r.itemId===item.id ? Number(r.qty)||0 : 0),0);
+}
+function tireAvailableTotal(item){ return Math.max(0, totalQty(item)-tireReservedTotal(item)); }
+function kybAvailableAt(item, loc, excludeReservationId){
+  return Math.max(0, kybLocQty((item.locations||{})[loc]) -
+    activeReservedQty("kyb", item.id, loc, null, excludeReservationId));
+}
+function kybReservedTotal(item){
+  return stockReservationsCache.reduce((sum,r)=>sum+(r.status==="active" && r.source==="kyb" && r.itemId===item.id ? Number(r.qty)||0 : 0),0);
+}
+function kybAvailableTotal(item){ return Math.max(0, kybTotalQty(item)-kybReservedTotal(item)); }
+function reservationStateLabel(order){
+  if(!order || !order.reservationId) return "舊訂單未預留";
+  if(order.reservationStatus==="released") return "預留已釋放";
+  if(order.reservationStatus==="consumed") return "已完成出貨";
+  return "已預留";
+}
+function renderAvailabilityViews(){
+  if(typeof renderQuery==="function") renderQuery();
+  if(typeof renderMaster==="function") renderMaster();
+  if(typeof renderKybQuery==="function") renderKybQuery();
+  if(typeof renderKybMaster==="function") renderKybMaster();
+  if(typeof renderOrders==="function") renderOrders();
+  if(typeof renderMyOrders==="function") renderMyOrders();
+  if(typeof renderKybOrders==="function") renderKybOrders();
+  if(typeof renderKybMyOrders==="function") renderKybMyOrders();
+}
+function startStockReservationListener(){
+  if(reservationsListenerStarted) return;
+  reservationsListenerStarted = true;
+  startRealtimeListener(()=>db.collection("stockReservations").where("status","==","active"), snap=>{
+    stockReservationsCache = snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderAvailabilityViews();
+  }, "stock reservations");
+}
+function startTireListeners(){
+  startStockReservationListener();
+  startRealtimeListener(()=>db.collection("items"), snap=>{
+    itemsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    renderQuery(); renderMaster();
+  }, "tire items");
+  startRealtimeListener(()=>db.collection("locations"), snap=>{
+    locationsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    renderLocations();
+  }, "tire locations");
+  startRealtimeListener(()=>db.collection("transactions").orderBy("date","desc").limit(200), snap=>{
+    txnCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    renderTxns();
+  }, "tire transactions");
+  if(userHasAnyRole("warehouse")){
+    db.collection("orders").where("status","==","pending").onSnapshot(snap=>{
+      ordersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderOrders(); updateOrdersBadge();
+    });
+  }else{
+    let myOrdersByUid = [], myOrdersByName = [];
+    const refreshMyOrders = ()=>{
+      const merged = new Map([...myOrdersByName,...myOrdersByUid].map(o=>[o.id,o]));
+      myOrdersCache = [...merged.values()]; renderMyOrders();
+    };
+    db.collection("orders").where("requestedByUid","==",currentUser.uid).onSnapshot(snap=>{
+      myOrdersByUid=snap.docs.map(d=>({id:d.id,...d.data()})); refreshMyOrders();
+    });
+    db.collection("orders").where("requestedByName","==",currentUser.name).onSnapshot(snap=>{
+      myOrdersByName=snap.docs.map(d=>({id:d.id,...d.data()})); refreshMyOrders();
+    });
+  }
+  db.collection("brands").onSnapshot(snap=>{
+    brandsCache=snap.docs.map(d=>d.data().name);
+    if(brandsCache.length===0) brandsCache=DEFAULT_BRANDS.slice();
+  },()=>{brandsCache=DEFAULT_BRANDS.slice();});
+}
+function startKybListeners(){
+  startStockReservationListener();
+  startRealtimeListener(()=>db.collection("kybItems"), snap=>{
+    kybItemsCache=snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderKybQuery(); renderKybMaster();
+  }, "kyb items");
+  startRealtimeListener(()=>db.collection("kybLocations"), snap=>{
+    kybLocationsCache=snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderKybLocations();
+  }, "kyb locations");
+  startRealtimeListener(()=>db.collection("kybTransactions").orderBy("date","desc").limit(200), snap=>{
+    kybTxnCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderKybTxns();
+  }, "kyb transactions");
+  if(userHasAnyRole("warehouse")){
+    db.collection("kybOrders").where("status","==","pending").onSnapshot(snap=>{
+      kybOrdersCache=snap.docs.map(d=>({id:d.id,...d.data()}));
+      renderKybOrders(); updateKybOrdersBadge();
+    });
+  }else{
+    let myKybOrdersByUid=[], myKybOrdersByName=[];
+    const refreshMyKybOrders=()=>{
+      const merged=new Map([...myKybOrdersByName,...myKybOrdersByUid].map(o=>[o.id,o]));
+      kybMyOrdersCache=[...merged.values()]; renderKybMyOrders();
+    };
+    db.collection("kybOrders").where("requestedByUid","==",currentUser.uid).onSnapshot(snap=>{
+      myKybOrdersByUid=snap.docs.map(d=>({id:d.id,...d.data()})); refreshMyKybOrders();
+    });
+    db.collection("kybOrders").where("requestedByName","==",currentUser.name).onSnapshot(snap=>{
+      myKybOrdersByName=snap.docs.map(d=>({id:d.id,...d.data()})); refreshMyKybOrders();
+    });
+  }
+}

@@ -148,7 +148,7 @@ function renderKybMaster(){
       <td>${escapeHtml(it.carModel)}${pending?'<span class="pending-tag">尚未入庫</span>':''}</td>
       <td>${escapeHtml(it.carMake||"")}</td>
       <td>${escapeHtml(it.bucketType||"")}</td>
-      <td>${kybTotalQty(it)}</td>
+      <td>庫存 ${kybTotalQty(it)}<br><small>預留 ${kybReservedTotal(it)}／可用 ${kybAvailableTotal(it)}</small></td>
       <td class="loc-detail-cell">${locHtml}</td>
       <td>${escapeHtml(it.yearCode||"")}</td>
       <td>${escapeHtml(it.partNo||"")}</td>
@@ -189,13 +189,15 @@ function openKybLocationModal(itemId, code){
   if(!item) return;
   const allLocs = item.locations || {};
   const qty = kybLocQty(allLocs[code]);
+  const reserved = activeReservedQty("kyb", itemId, code, null, null);
+  const movableQty = Math.max(0, qty - reserved);
   const allCodes = kybLocationsCache.map(l=>l.code);
 
   const html = `
     <div class="sheet-head"><h2>儲位管理：${escapeHtml(code)}</h2><button class="sheet-close" onclick="closeModal()">✕</button></div>
     <div class="form-row"><label>目前儲位</label><input type="text" value="${escapeHtml(code)}" disabled></div>
-    <div class="form-row"><label>目前庫存</label><input type="text" value="${qty}" disabled></div>
-    <div class="form-row"><label>搬出數量（不搬就留空）</label><input type="number" id="kybMoveQty" min="1" max="${qty}"></div>
+    <div class="form-row"><label>庫存狀態</label><input type="text" value="庫存 ${qty}　已預留 ${reserved}　可搬動 ${movableQty}" disabled></div>
+    <div class="form-row"><label>搬出數量（不搬就留空）</label><input type="number" id="kybMoveQty" min="1" max="${movableQty}"></div>
     <div class="form-row"><label>搬到哪個儲位（只能選現有儲位）</label>
       <select id="kybMoveTarget"><option value="">請選擇</option>${allCodes.filter(c=>c!==code).map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}</select>
     </div>
@@ -211,7 +213,7 @@ function openKybLocationModal(itemId, code){
     const moveQty = moveQtyRaw ? Number(moveQtyRaw) : 0;
     if(moveQty <= 0){ closeModal(); return; }
     if(!moveTarget){ alert("請選擇要搬到哪個儲位"); return; }
-    if(moveQty > qty){ alert("搬出數量不能超過目前庫存"); return; }
+    if(moveQty > movableQty){ alert(`這個儲位可搬動量只有 ${movableQty}；已預留 ${reserved} 的數量不能搬移。`); return; }
 
     const newLocs = {...allLocs};
     newLocs[code] = qty - moveQty;
@@ -237,3 +239,54 @@ document.getElementById("kybExportBtn").addEventListener("click", ()=>{
   XLSX.utils.book_append_sheet(wb, ws, "資料");
   XLSX.writeFile(wb, `KYB庫存總表_篩選結果_${todayStr()}.xlsx`);
 });
+
+
+// ===== 第 5 批：KYB 叫貨時建立預留 =====
+async function createReservedKybOrder(data){
+  const orderRef=db.collection("kybOrders").doc();
+  const reservationRef=db.collection("stockReservations").doc();
+  const reservationKey=makeReservationKey("kyb",data.itemId,data.loc,null);
+  await db.runTransaction(async tx=>{
+    const itemRef=db.collection("kybItems").doc(data.itemId);
+    const reservationQuery=db.collection("stockReservations").where("reservationKey","==",reservationKey);
+    const itemSnap=await tx.get(itemRef);
+    const reservationSnap=await tx.get(reservationQuery);
+    if(!itemSnap.exists) throw new Error("找不到車型，請重新整理後再試一次");
+    const actual=kybLocQty((itemSnap.data().locations||{})[data.loc]);
+    const reserved=reservationSnap.docs.reduce((sum,d)=>{const r=d.data();return sum+(r.status==="active"?Number(r.qty)||0:0);},0);
+    if(data.qty>actual-reserved) throw new Error(`這個儲位可用庫存只剩 ${Math.max(0,actual-reserved)}，請重新選擇數量或儲位`);
+    const now=new Date().toISOString();
+    tx.set(orderRef,{...data,status:"pending",reservationId:reservationRef.id,reservationStatus:"active",requestedAt:now});
+    tx.set(reservationRef,{source:"kyb",orderId:orderRef.id,itemId:data.itemId,loc:data.loc,batchDate:null,qty:data.qty,reservationKey,status:"active",reservedByUid:currentUser.uid,reservedByName:currentUser.name,createdAt:now});
+  });
+}
+function renderKybQuery(){
+  const box=document.getElementById("kybQueryResults"),countEl=document.getElementById("kybQueryCount"); if(!box||!countEl)return;
+  const q=norm(document.getElementById("kybQueryBox").value); let list=kybItemsCache.slice();
+  if(q) list=list.filter(it=>norm(it.carModel).includes(q)||norm(it.carMake).includes(q));
+  const rank=it=>kybHasPendingStock(it)?0:(kybAvailableTotal(it)>0?1:2); list.sort((a,b)=>(rank(a)-rank(b))||kybCompareItems(a,b));
+  const availableCount=list.filter(it=>kybAvailableTotal(it)>0).length;
+  countEl.textContent=q?`找到 ${list.length} 筆（可用 ${availableCount} 筆）`:`共 ${list.length} 筆車型（可用 ${availableCount} 筆）`;
+  box.innerHTML=list.slice(0,kybQueryVisibleCount).map(it=>{
+    const physical=kybTotalQty(it),reserved=kybReservedTotal(it),available=kybAvailableTotal(it),unavailable=available<=0,pending=kybHasPendingStock(it);
+    const subParts=["KYB"];if(it.bucketType)subParts.push(it.bucketType);if(it.carMake)subParts.push(it.carMake);
+    return `<div class="card${unavailable?' card-nostock':''}${pending?' card-pending':''}"><div class="code-row"><div class="code">${escapeHtml(it.carModel)}${pending?'<span class="pending-tag">尚未入庫</span>':''}</div>${unavailable?'':`<button class="order-btn" data-id="${it.id}">${ICONS.cart}叫貨</button>`}</div><div class="sub">${escapeHtml(subParts.join('　'))}</div><div class="qty">庫存 ${physical}　預留 ${reserved}　<span style="color:#2e7d32;font-weight:700;">可用 ${available}</span>${it.warrantyPrice!=null?`　　保修廠價 ${it.warrantyPrice}`:""}${it.catalogPrice!=null?`　　一線消費者售價 ${it.catalogPrice}`:""}</div><div class="sub">儲位：${escapeHtml(kybLocSummary(it))}</div></div>`;
+  }).join("")||`<div class="empty">查無符合的車型</div>`;
+  if(list.length>kybQueryVisibleCount)box.innerHTML+=`<button id="kybQueryLoadMoreBtn" class="load-more-btn">顯示更多（還有 ${list.length-kybQueryVisibleCount} 筆，目前顯示 ${kybQueryVisibleCount} 筆）</button>`;
+  box.querySelectorAll(".order-btn").forEach(b=>b.addEventListener("click",()=>openKybOrderModal(b.dataset.id)));
+  const more=document.getElementById("kybQueryLoadMoreBtn");if(more)more.addEventListener("click",()=>{kybQueryVisibleCount+=200;renderKybQuery();});
+}
+function openKybOrderModal(itemId){
+  const item=kybItemsCache.find(i=>i.id===itemId);if(!item)return;
+  const options=kybLocList(item).map(o=>({...o,available:kybAvailableAt(item,o.code)})).filter(o=>o.available>0);
+  const physical=kybTotalQty(item),reserved=kybReservedTotal(item),available=kybAvailableTotal(item);
+  const html=`<div class="sheet-head"><h2>叫貨：${escapeHtml(item.carModel)}</h2><button class="sheet-close" onclick="closeModal()">✕</button></div><div class="form-row"><label>車型／品牌</label><input type="text" value="${escapeHtml(item.carModel)}（KYB）" disabled></div><div class="form-row"><label>庫存狀態</label><input type="text" value="實際庫存 ${physical}　已預留 ${reserved}　可用 ${available}" disabled></div><div class="form-row"><label>選擇儲位</label><select id="kybOrderLoc">${options.length?options.map((o,i)=>`<option value="${i}">${escapeHtml(o.code)}（庫存 ${o.qty}／可用 ${o.available}）</option>`).join(""):`<option value="">目前沒有可用庫存</option>`}</select></div><div class="form-row"><label>數量</label><select id="kybOrderQty"></select></div><div class="form-row"><label>客戶姓名</label><input type="text" id="kybOrderCustomerName"></div><div class="form-row"><label>聯絡方式</label><input type="text" id="kybOrderCustomerContact"></div><div class="form-row"><label>備註</label><input type="text" id="kybOrderCustomerNote"></div><div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="kybOrderSubmitBtn">送出並預留</button></div>`;
+  openModal(html);
+  const refresh=()=>{const opt=options[Number(document.getElementById("kybOrderLoc").value)],el=document.getElementById("kybOrderQty");el.innerHTML=opt?Array.from({length:opt.available},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join(""):`<option value="0">目前無可用庫存</option>`;};
+  if(options.length)document.getElementById("kybOrderLoc").addEventListener("change",refresh);refresh();
+  document.getElementById("kybOrderSubmitBtn").addEventListener("click",async()=>{
+    const opt=options[Number(document.getElementById("kybOrderLoc").value)],qty=Number(document.getElementById("kybOrderQty").value),customerName=document.getElementById("kybOrderCustomerName").value.trim(),customerContact=document.getElementById("kybOrderCustomerContact").value.trim(),customerNote=document.getElementById("kybOrderCustomerNote").value.trim();
+    if(!opt||!qty||qty<=0){alert("請選擇有可用量的儲位與數量");return;}if(!customerName){alert("請輸入客戶姓名");return;}
+    try{await createReservedKybOrder({itemId:item.id,itemLabel:`${item.carModel}（KYB）`,qty,loc:opt.code,customerName,customerContact,customerNote,requestedByUid:currentUser.uid,requestedByName:currentUser.name});closeModal();alert("已送出，庫存已預留，等待倉管確認出貨。");}catch(e){alert("送出失敗："+e.message);}
+  });
+}
