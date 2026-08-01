@@ -14,7 +14,61 @@ function renderErpReceivables(){
 function openReceiptForm(receivableId,receiptId){
  const receipt=receiptId?erpReceiptsCache.find(x=>x.id===receiptId):null,alloc=receipt&&receipt.allocations&&receipt.allocations[0],rec=receivableId?erpReceivablesCache.find(x=>x.id===receivableId):alloc&&erpReceivablesCache.find(x=>x.id===alloc.receivableId);if(!rec)return alert("找不到對應應收款。");
  const old=document.getElementById("erpReceiptOverlay");if(old)old.remove();const max=(Number(rec.balanceAmount)||0)+(receipt?Number(receipt.amount)||0:0),d=receipt||{receiptDate:todayStr(),amount:rec.balanceAmount,method:"匯款",referenceNo:"",notes:""};
- const box=document.createElement("div");box.id="erpReceiptOverlay";box.className="erp-print-overlay";box.innerHTML='<div class="erp-print-paper erp-receipt-form"><h2>'+ (receipt?"修改收款":"登錄收款") +'</h2><p><strong>'+erpEscape(rec.customerName)+'</strong>｜'+erpEscape(rec.invoiceNo)+'｜可收上限 NT$ '+erpMoney(max)+'</p><form id="erpReceiptForm" class="erp-form"><div class="erp-form-row"><label>收款日期<input name="date" type="date" value="'+erpEscape(d.receiptDate)+'" required></label><label>收款金額<input name="amount" type="number" min="1" max="'+max+'" value="'+(Number(d.amount)||0)+'" required></label></div><div class="erp-form-row"><label>收款方式<select name="method"><option'+(d.method==="現金"?" selected":"")+'>現金</option><option'+(d.method==="匯款"?" selected":"")+'>匯款</option><option'+(d.method==="支票"?" selected":"")+'>支票</option><option'+(d.method==="刷卡"?" selected":"")+'>刷卡</option><option'+(d.method==="其他"?" selected":"")+'>其他</option></select></label><label>銀行／交易序號<input name="reference" value="'+erpEscape(d.referenceNo||"")+'"></label></div><label>備註<textarea name="notes" rows="2">'+erpEscape(d.notes||"")+'</textarea></label><div class="erp-form-actions"><button type="button" class="erp-secondary" id="closeReceipt">取消</button><button class="erp-primary">儲存收款</button></div></form></div>';document.body.appendChild(box);document.getElementById("closeReceipt").onclick=()=>box.remove();document.getElementById("erpReceiptForm").onsubmit=e=>{e.preventDefault();saveErpReceipt(rec,receipt,e.currentTarget,max,box);};
+ const box=document.createElement("div");box.id="erpReceiptOverlay";box.className="erp-print-overlay";box.innerHTML='<div class="erp-print-paper erp-receipt-form"><h2>'+ (receipt?"修改收款":"登錄收款") +'</h2><p><strong>'+erpEscape(rec.customerName)+'</strong>｜'+erpEscape(rec.invoiceNo)+'｜可收上限 NT$ '+erpMoney(max)+'（僅供參考，實際以送出時的最新餘額為準）</p><form id="erpReceiptForm" class="erp-form"><div class="erp-form-row"><label>收款日期<input name="date" type="date" value="'+erpEscape(d.receiptDate)+'" required></label><label>收款金額<input name="amount" type="number" min="1" value="'+(Number(d.amount)||0)+'" required></label></div><div class="erp-form-row"><label>收款方式<select name="method"><option'+(d.method==="現金"?" selected":"")+'>現金</option><option'+(d.method==="匯款"?" selected":"")+'>匯款</option><option'+(d.method==="支票"?" selected":"")+'>支票</option><option'+(d.method==="刷卡"?" selected":"")+'>刷卡</option><option'+(d.method==="其他"?" selected":"")+'>其他</option></select></label><label>銀行／交易序號<input name="reference" value="'+erpEscape(d.referenceNo||"")+'"></label></div><label>備註<textarea name="notes" rows="2">'+erpEscape(d.notes||"")+'</textarea></label><div class="erp-form-actions"><button type="button" class="erp-secondary" id="closeReceipt">取消</button><button class="erp-primary">儲存收款</button></div></form></div>';document.body.appendChild(box);document.getElementById("closeReceipt").onclick=()=>box.remove();document.getElementById("erpReceiptForm").onsubmit=e=>{e.preventDefault();saveErpReceipt(rec,receipt,e.currentTarget,box);};
 }
-async function saveErpReceipt(rec,old,form,max,box){const amount=Number(form.elements.amount.value);if(!Number.isFinite(amount)||amount<=0||amount>max)return alert("請輸入正確金額。");const oldAmt=old?Number(old.amount)||0:0,received=(Number(rec.receivedAmount)||0)-oldAmt+amount,balance=(Number(rec.balanceAmount)||0)+oldAmt-amount,status=balance===0?"paid":received>0?"partial":"open",data={receiptDate:form.elements.date.value,amount,method:form.elements.method.value,referenceNo:form.elements.reference.value.trim(),notes:form.elements.notes.value.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedByUid:currentUser.uid,updatedByName:currentUser.name};const batch=db.batch(),ref=old?db.collection("erpReceipts").doc(old.id):db.collection("erpReceipts").doc();if(old)batch.update(ref,data);else batch.set(ref,{...data,receiptNo:"RC-"+Date.now(),customerId:rec.customerId||null,customerName:rec.customerName,allocations:[{receivableId:rec.id,invoiceId:rec.invoiceId,amount}],createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});batch.update(db.collection("erpReceivables").doc(rec.id),{receivedAmount:received,balanceAmount:balance,status,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});try{await batch.commit();box.remove();logErpAudit(old?"receipt_updated":"receipt_created",ref.id,{amount,receivableId:rec.id});}catch(e){console.error(e);alert("儲存失敗，請確認 Firebase Rules 權限。");}}
-async function voidErpReceipt(id){const r=erpReceiptsCache.find(x=>x.id===id);if(!r||r.voided)return;const alloc=r.allocations&&r.allocations[0],rec=alloc&&erpReceivablesCache.find(x=>x.id===alloc.receivableId);if(!rec)return alert("找不到對應應收款。");if(!confirm("作廢此收款？系統會自動回補應收金額。"))return;const amount=Number(r.amount)||0,received=Math.max(0,(Number(rec.receivedAmount)||0)-amount),balance=(Number(rec.balanceAmount)||0)+amount,status=received>0?"partial":"open",batch=db.batch();batch.update(db.collection("erpReceipts").doc(id),{voided:true,voidedAt:firebase.firestore.FieldValue.serverTimestamp(),voidedByUid:currentUser.uid,voidedByName:currentUser.name});batch.update(db.collection("erpReceivables").doc(rec.id),{receivedAmount:received,balanceAmount:balance,status,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});try{await batch.commit();logErpAudit("receipt_voided",id,{amount,receivableId:rec.id});}catch(e){console.error(e);alert("作廢失敗。");}}
+// 收款登錄／修改：改用 Firestore transaction，交易內重新讀取應收帳款的最新狀態再計算，
+// 避免兩個人（或同一人開兩個分頁）同時登錄收款時，其中一筆的金額被另一筆覆蓋掉。
+async function saveErpReceipt(rec,old,form,box){
+  const amount=Number(form.elements.amount.value);
+  if(!Number.isFinite(amount)||amount<=0)return alert("請輸入正確金額。");
+  const receivableRef=db.collection("erpReceivables").doc(rec.id);
+  const receiptRef=old?db.collection("erpReceipts").doc(old.id):db.collection("erpReceipts").doc();
+  const data={receiptDate:form.elements.date.value,amount,method:form.elements.method.value,referenceNo:form.elements.reference.value.trim(),notes:form.elements.notes.value.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedByUid:currentUser.uid,updatedByName:currentUser.name};
+  try{
+    await db.runTransaction(async tx=>{
+      const snap=await tx.get(receivableRef);
+      if(!snap.exists) throw new Error("找不到對應應收款，可能已被刪除，請重新整理後再試。");
+      const cur=snap.data();
+      const oldAmt=old?Number(old.amount)||0:0;
+      const received=(Number(cur.receivedAmount)||0)-oldAmt+amount;
+      const balance=(Number(cur.balanceAmount)||0)+oldAmt-amount;
+      if(balance<0) throw new Error("金額超過目前可收餘額，可能有其他人剛收過款，請重新整理後再試。");
+      const status=balance===0?"paid":received>0?"partial":"open";
+      if(old){
+        tx.update(receiptRef,data);
+      }else{
+        tx.set(receiptRef,{...data,receiptNo:"RC-"+Date.now(),customerId:rec.customerId||null,customerName:rec.customerName,allocations:[{receivableId:rec.id,invoiceId:rec.invoiceId,amount}],createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});
+      }
+      tx.update(receivableRef,{receivedAmount:received,balanceAmount:balance,status,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    });
+    box.remove();
+    logErpAudit(old?"receipt_updated":"receipt_created",receiptRef.id,{amount,receivableId:rec.id});
+  }catch(e){
+    console.error(e);
+    alert("儲存失敗："+(e.message||"請確認 Firebase Rules 權限。"));
+  }
+}
+async function voidErpReceipt(id){
+  const r=erpReceiptsCache.find(x=>x.id===id);if(!r||r.voided)return;
+  const alloc=r.allocations&&r.allocations[0];if(!alloc)return alert("找不到對應應收款。");
+  if(!confirm("作廢此收款？系統會自動回補應收金額。"))return;
+  const receiptRef=db.collection("erpReceipts").doc(id);
+  const receivableRef=db.collection("erpReceivables").doc(alloc.receivableId);
+  const amount=Number(r.amount)||0;
+  try{
+    await db.runTransaction(async tx=>{
+      const snap=await tx.get(receivableRef);
+      if(!snap.exists) throw new Error("找不到對應應收款，可能已被刪除。");
+      const cur=snap.data();
+      const received=Math.max(0,(Number(cur.receivedAmount)||0)-amount);
+      const balance=(Number(cur.balanceAmount)||0)+amount;
+      const status=received>0?"partial":"open";
+      tx.update(receiptRef,{voided:true,voidedAt:firebase.firestore.FieldValue.serverTimestamp(),voidedByUid:currentUser.uid,voidedByName:currentUser.name});
+      tx.update(receivableRef,{receivedAmount:received,balanceAmount:balance,status,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    });
+    logErpAudit("receipt_voided",id,{amount,receivableId:alloc.receivableId});
+  }catch(e){
+    console.error(e);
+    alert("作廢失敗："+(e.message||""));
+  }
+}
