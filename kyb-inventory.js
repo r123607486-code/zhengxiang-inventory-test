@@ -76,7 +76,7 @@ function openKybOrderModal(itemId){
       <select id="kybOrderLoc">${options.length ? options.map((o,i)=>`<option value="${i}">${escapeHtml(o.code)}（目前${o.qty}）</option>`).join("") : `<option value="">目前無庫存</option>`}</select>
     </div>
     <div class="form-row"><label>數量</label><select id="kybOrderQty"></select></div>
-    <div class="form-row"><label>客戶姓名</label><input type="text" id="kybOrderCustomerName"></div>
+    <div class="form-row"><label>客戶姓名（可輸入關鍵字搜尋並點選帶入）</label><input type="text" id="kybOrderCustomerName" autocomplete="off"><div class="autocomplete-list hidden" id="kybOrderCustomerList"></div></div>
     <div class="form-row"><label>聯絡方式</label><input type="text" id="kybOrderCustomerContact"></div>
     <div class="form-row"><label>備註</label><input type="text" id="kybOrderCustomerNote"></div>
     <div class="form-actions">
@@ -248,16 +248,17 @@ async function createReservedKybOrder(data){
   const reservationKey=makeReservationKey("kyb",data.itemId,data.loc,null);
   await db.runTransaction(async tx=>{
     const itemRef=db.collection("kybItems").doc(data.itemId);
-    const reservationQuery=db.collection("stockReservations").where("reservationKey","==",reservationKey);
+    const balanceRef=reservationBalanceRef("kyb",data.itemId,data.loc,null);
     const itemSnap=await tx.get(itemRef);
-    const reservationSnap=await tx.get(reservationQuery);
+    const balanceSnap=await tx.get(balanceRef);
     if(!itemSnap.exists) throw new Error("找不到車型，請重新整理後再試一次");
     const actual=kybLocQty((itemSnap.data().locations||{})[data.loc]);
-    const reserved=reservationSnap.docs.reduce((sum,d)=>{const r=d.data();return sum+(r.status==="active"?Number(r.qty)||0:0);},0);
+    const reserved=reservationBalanceQty(balanceSnap);
     if(data.qty>actual-reserved) throw new Error(`這個儲位可用庫存只剩 ${Math.max(0,actual-reserved)}，請重新選擇數量或儲位`);
     const now=new Date().toISOString();
     tx.set(orderRef,{...data,status:"pending",reservationId:reservationRef.id,reservationStatus:"active",requestedAt:now});
-    tx.set(reservationRef,{source:"kyb",orderId:orderRef.id,itemId:data.itemId,loc:data.loc,batchDate:null,qty:data.qty,reservationKey,status:"active",reservedByUid:currentUser.uid,reservedByName:currentUser.name,createdAt:now});
+    tx.set(reservationRef,{source:"kyb",orderId:orderRef.id,itemId:data.itemId,loc:data.loc,batchDate:null,qty:data.qty,reservationKey,balanceId:balanceRef.id,status:"active",reservedByUid:currentUser.uid,reservedByName:currentUser.name,createdAt:now});
+    writeReservationBalance(tx,balanceRef,"kyb",data.itemId,data.loc,null,reserved+data.qty);
   });
 }
 function renderKybQuery(){
@@ -282,11 +283,13 @@ function openKybOrderModal(itemId){
   const physical=kybTotalQty(item),reserved=kybReservedTotal(item),available=kybAvailableTotal(item);
   const html=`<div class="sheet-head"><h2>叫貨：${escapeHtml(item.carModel)}</h2><button class="sheet-close" onclick="closeModal()">✕</button></div><div class="form-row"><label>車型／品牌</label><input type="text" value="${escapeHtml(item.carModel)}（KYB）" disabled></div><div class="form-row"><label>庫存狀態</label><input type="text" value="實際庫存 ${physical}　已預留 ${reserved}　可用 ${available}" disabled></div><div class="form-row"><label>選擇儲位</label><select id="kybOrderLoc">${options.length?options.map((o,i)=>`<option value="${i}">${escapeHtml(o.code)}（庫存 ${o.qty}／可用 ${o.available}）</option>`).join(""):`<option value="">目前沒有可用庫存</option>`}</select></div><div class="form-row"><label>數量</label><select id="kybOrderQty"></select></div><div class="form-row"><label>客戶姓名</label><input type="text" id="kybOrderCustomerName"></div><div class="form-row"><label>聯絡方式</label><input type="text" id="kybOrderCustomerContact"></div><div class="form-row"><label>備註</label><input type="text" id="kybOrderCustomerNote"></div><div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="kybOrderSubmitBtn">送出並預留</button></div>`;
   openModal(html);
+  bindOrderCustomerLookup("kybOrderCustomerName","kybOrderCustomerContact","kybOrderCustomerList");
   const refresh=()=>{const opt=options[Number(document.getElementById("kybOrderLoc").value)],el=document.getElementById("kybOrderQty");el.innerHTML=opt?Array.from({length:opt.available},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join(""):`<option value="0">目前無可用庫存</option>`;};
   if(options.length)document.getElementById("kybOrderLoc").addEventListener("change",refresh);refresh();
   document.getElementById("kybOrderSubmitBtn").addEventListener("click",async()=>{
-    const opt=options[Number(document.getElementById("kybOrderLoc").value)],qty=Number(document.getElementById("kybOrderQty").value),customerName=document.getElementById("kybOrderCustomerName").value.trim(),customerContact=document.getElementById("kybOrderCustomerContact").value.trim(),customerNote=document.getElementById("kybOrderCustomerNote").value.trim();
+    const opt=options[Number(document.getElementById("kybOrderLoc").value)],qty=Number(document.getElementById("kybOrderQty").value),customerInput=document.getElementById("kybOrderCustomerName"),customerName=customerInput.value.trim(),customerContact=document.getElementById("kybOrderCustomerContact").value.trim(),customerNote=document.getElementById("kybOrderCustomerNote").value.trim();
+    const customerId=customerInput.dataset.partyId||null,customerCode=customerInput.dataset.partyCode||"",customerContactPerson=customerInput.dataset.partyContact||"";
     if(!opt||!qty||qty<=0){alert("請選擇有可用量的儲位與數量");return;}if(!customerName){alert("請輸入客戶姓名");return;}
-    try{await createReservedKybOrder({itemId:item.id,itemLabel:`${item.carModel}（KYB）`,qty,loc:opt.code,customerName,customerContact,customerNote,requestedByUid:currentUser.uid,requestedByName:currentUser.name});closeModal();alert("已送出，庫存已預留，等待倉管確認出貨。");}catch(e){alert("送出失敗："+e.message);}
+    try{await createReservedKybOrder({itemId:item.id,itemLabel:`${item.carModel}（KYB）`,qty,loc:opt.code,customerId,customerCode,customerContactPerson,customerName,customerContact,customerNote,requestedByUid:currentUser.uid,requestedByName:currentUser.name});closeModal();alert("已送出，庫存已預留，等待倉管確認出貨。");}catch(e){alert("送出失敗："+e.message);}
   });
 }

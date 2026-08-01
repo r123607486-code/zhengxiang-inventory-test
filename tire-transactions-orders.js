@@ -731,3 +731,84 @@ async function submitTxn(itemId,type,qty,loc,batchDate,unitCost){
   });
   await refreshTireViews();closeModal();
 }
+
+
+// ===== 第 5 批修正：輪胎預留餘額交易（不在交易中查詢）=====
+function tireReservationBalanceRef(res){
+  return db.collection("stockReservationBalances").doc(res.balanceId||reservationBalanceId("tire",res.itemId,res.loc,res.batchDate||null));
+}
+async function releaseTireReservation(orderId,reason){
+  if(!confirm("確定要釋放這筆訂單的庫存預留嗎？訂單會保留為待確認，但數量將重新開放給其他叫貨。"))return;
+  try{await db.runTransaction(async tx=>{
+    const orderRef=db.collection("orders").doc(orderId),orderSnap=await tx.get(orderRef);
+    if(!orderSnap.exists)throw new Error("找不到訂單");const order=orderSnap.data();
+    if(!order.reservationId)throw new Error("這是舊訂單，沒有可釋放的預留");
+    const resRef=db.collection("stockReservations").doc(order.reservationId),resSnap=await tx.get(resRef);
+    if(!resSnap.exists||resSnap.data().status!=="active")throw new Error("這筆預留已經不是啟用狀態");
+    const res=resSnap.data(),balanceRef=tireReservationBalanceRef(res),balanceSnap=await tx.get(balanceRef),now=new Date().toISOString();
+    writeReservationBalance(tx,balanceRef,"tire",res.itemId,res.loc,res.batchDate||null,reservationBalanceQty(balanceSnap)-Number(res.qty||0));
+    tx.update(resRef,{status:"released",releasedAt:now,releasedBy:currentUser.name,releaseReason:reason});
+    tx.update(orderRef,{reservationStatus:"released",reservationReleasedAt:now,reservationReleasedBy:currentUser.name});
+  });}catch(e){alert("釋放失敗："+e.message);}
+}
+async function cancelOrder(orderId){
+  if(!confirm("確定要取消這筆訂單嗎？若仍有預留量，會同時釋放。"))return;
+  try{await db.runTransaction(async tx=>{
+    const orderRef=db.collection("orders").doc(orderId),orderSnap=await tx.get(orderRef);if(!orderSnap.exists)throw new Error("找不到訂單");
+    const order=orderSnap.data();if(order.status!=="pending")throw new Error("只有待確認訂單可以取消");
+    let resRef=null,resSnap=null,balanceRef=null,balanceSnap=null;
+    if(order.reservationId){resRef=db.collection("stockReservations").doc(order.reservationId);resSnap=await tx.get(resRef);if(resSnap.exists&&resSnap.data().status==="active"){balanceRef=tireReservationBalanceRef(resSnap.data());balanceSnap=await tx.get(balanceRef);}}
+    const now=new Date().toISOString();
+    if(resSnap&&resSnap.exists&&resSnap.data().status==="active"){const res=resSnap.data();writeReservationBalance(tx,balanceRef,"tire",res.itemId,res.loc,res.batchDate||null,reservationBalanceQty(balanceSnap)-Number(res.qty||0));tx.update(resRef,{status:"released",releasedAt:now,releasedBy:currentUser.name,releaseReason:"訂單取消"});}
+    tx.update(orderRef,{status:"cancelled",cancelledAt:now,cancelledBy:currentUser.name,reservationStatus:resSnap&&resSnap.exists&&resSnap.data().status==="active"?"released":order.reservationStatus||null});
+  });}catch(e){alert("取消失敗："+e.message);}
+}
+async function confirmTireOrder(order,loc,batchDate){
+  return db.runTransaction(async tx=>{
+    const orderRef=db.collection("orders").doc(order.id),itemRef=db.collection("items").doc(order.itemId);
+    const orderSnap=await tx.get(orderRef),itemSnap=await tx.get(itemRef);if(!orderSnap.exists||!itemSnap.exists)throw new Error("訂單或品項已不存在");
+    const live=orderSnap.data();if(live.status!=="pending")throw new Error("這筆訂單已不是待確認狀態");
+    let resRef=null,resSnap=null,res=null,oldBalanceRef=null,oldBalanceSnap=null;
+    if(live.reservationId){resRef=db.collection("stockReservations").doc(live.reservationId);resSnap=await tx.get(resRef);if(resSnap.exists&&resSnap.data().status==="active"){res=resSnap.data();oldBalanceRef=tireReservationBalanceRef(res);}}
+    const selectedBalanceRef=reservationBalanceRef("tire",live.itemId,loc,batchDate||null),selectedBalanceSnap=await tx.get(selectedBalanceRef);
+    if(oldBalanceRef)oldBalanceSnap=oldBalanceRef.path===selectedBalanceRef.path?selectedBalanceSnap:await tx.get(oldBalanceRef);
+    const item={id:live.itemId,...itemSnap.data()},physical=tireStockAt(item,loc,batchDate||null),selectedReserved=reservationBalanceQty(selectedBalanceSnap),ownReserved=res&&oldBalanceRef.path===selectedBalanceRef.path?Number(res.qty||0):0,available=physical-Math.max(0,selectedReserved-ownReserved);
+    if(live.qty>available)throw new Error(`這一批可用庫存只剩 ${Math.max(0,available)}，請改選其他儲位／批次`);
+    const allLocs={...(item.locations||{})};let remain=live.qty;let batches=normalizeBatches(allLocs[loc],item).map(b=>({...b}));
+    batches.forEach(b=>{if(remain>0&&(b.productionDate||null)===(batchDate||null)){const take=Math.min(remain,Number(b.qty)||0);b.qty-=take;remain-=take;}});
+    if(remain>0)throw new Error("批次庫存不足，請重新整理後再試一次");
+    batches=batches.filter(b=>b.qty>0);if(batches.length)allLocs[loc]=batches;else delete allLocs[loc];
+    const now=new Date().toISOString(),txnRef=db.collection("transactions").doc();
+    tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId:live.itemId,type:"out",qty:live.qty,loc,batchDate:batchDate||null,date:todayStr(),operator:currentUser.name,salesperson:live.requestedByName||"",customerName:live.customerName||"",customerContact:live.customerContact||"",customerNote:live.customerNote||"",orderId:order.id,reservationId:live.reservationId||null,editLog:[],createdAt:now});
+    if(res){writeReservationBalance(tx,oldBalanceRef,"tire",res.itemId,res.loc,res.batchDate||null,reservationBalanceQty(oldBalanceSnap)-Number(res.qty||0));tx.update(resRef,{status:"consumed",consumedAt:now,consumedBy:currentUser.name,fulfilledLoc:loc,fulfilledBatchDate:batchDate||null});}
+    tx.update(orderRef,{status:"confirmed",confirmedAt:now,confirmedBy:currentUser.name,linkedTxnId:txnRef.id,reservationStatus:res?"consumed":live.reservationStatus||null});
+    return txnRef;
+  });
+}
+async function saveTireOrderEdit(order,change){
+  await db.runTransaction(async tx=>{
+    const orderRef=db.collection("orders").doc(order.id),itemRef=db.collection("items").doc(change.itemId);
+    const orderSnap=await tx.get(orderRef),itemSnap=await tx.get(itemRef);if(!orderSnap.exists||!itemSnap.exists)throw new Error("訂單或品項已不存在");
+    const live=orderSnap.data();if(live.status!=="pending")throw new Error("只有待確認訂單可以修改");
+    let oldRef=null,oldSnap=null,oldRes=null,oldBalanceRef=null,oldBalanceSnap=null;
+    if(live.reservationId){oldRef=db.collection("stockReservations").doc(live.reservationId);oldSnap=await tx.get(oldRef);if(oldSnap.exists&&oldSnap.data().status==="active"){oldRes=oldSnap.data();oldBalanceRef=tireReservationBalanceRef(oldRes);}}
+    const newBalanceRef=reservationBalanceRef("tire",change.itemId,change.loc,change.batchDate||null),newBalanceSnap=await tx.get(newBalanceRef);
+    if(oldBalanceRef)oldBalanceSnap=oldBalanceRef.path===newBalanceRef.path?newBalanceSnap:await tx.get(oldBalanceRef);
+    const item={id:change.itemId,...itemSnap.data()},physical=tireStockAt(item,change.loc,change.batchDate||null),newReserved=reservationBalanceQty(newBalanceSnap),ownReserved=oldRes&&oldBalanceRef.path===newBalanceRef.path?Number(oldRes.qty||0):0,available=physical-Math.max(0,newReserved-ownReserved);
+    if(change.qty>available)throw new Error(`新選擇的可用庫存只有 ${Math.max(0,available)}，無法預留 ${change.qty}`);
+    const now=new Date().toISOString(),same=oldRes&&oldBalanceRef.path===newBalanceRef.path;let reservationRef=oldRef;
+    if(same){writeReservationBalance(tx,newBalanceRef,"tire",change.itemId,change.loc,change.batchDate||null,newReserved-ownReserved+change.qty);tx.update(oldRef,{itemId:change.itemId,loc:change.loc,batchDate:change.batchDate||null,qty:change.qty,reservationKey:makeReservationKey("tire",change.itemId,change.loc,change.batchDate),balanceId:newBalanceRef.id,updatedAt:now,updatedBy:currentUser.name});}
+    else{if(oldRes){writeReservationBalance(tx,oldBalanceRef,"tire",oldRes.itemId,oldRes.loc,oldRes.batchDate||null,reservationBalanceQty(oldBalanceSnap)-Number(oldRes.qty||0));tx.update(oldRef,{status:"released",releasedAt:now,releasedBy:currentUser.name,releaseReason:"倉管修改訂單"});}reservationRef=db.collection("stockReservations").doc();tx.set(reservationRef,{source:"tire",orderId:order.id,itemId:change.itemId,loc:change.loc,batchDate:change.batchDate||null,qty:change.qty,reservationKey:makeReservationKey("tire",change.itemId,change.loc,change.batchDate),balanceId:newBalanceRef.id,status:"active",reservedByUid:live.requestedByUid||"",reservedByName:live.requestedByName||"",createdAt:now,createdBy:currentUser.name});writeReservationBalance(tx,newBalanceRef,"tire",change.itemId,change.loc,change.batchDate||null,newReserved+change.qty);}
+    tx.update(orderRef,{...change,reservationId:reservationRef.id,reservationStatus:"active",updatedAt:now,updatedBy:currentUser.name});
+  });
+}
+async function submitTxn(itemId,type,qty,loc,batchDate,unitCost){
+  const itemRef=db.collection("items").doc(itemId);
+  await db.runTransaction(async tx=>{
+    const itemSnap=await tx.get(itemRef);if(!itemSnap.exists)throw new Error("找不到品項");const item={id:itemId,...itemSnap.data()},allLocs={...(item.locations||{})},usedDate=batchDate||null;let batches=normalizeBatches(allLocs[loc],item).map(b=>({...b}));
+    const balanceRef=reservationBalanceRef("tire",itemId,loc,usedDate),balanceSnap=type==="out"?await tx.get(balanceRef):null;
+    if(type==="in"){const idx=batches.findIndex(b=>(b.productionDate||null)===usedDate);if(idx>=0)batches[idx].qty+=qty;else batches.push({qty,productionDate:usedDate});}
+    else{const available=tireStockAt(item,loc,usedDate)-reservationBalanceQty(balanceSnap);if(qty>available)throw new Error(`可用庫存只有 ${Math.max(0,available)}，不能扣除已預留數量`);let remain=qty;batches.forEach(b=>{if(remain>0&&(b.productionDate||null)===usedDate){const take=Math.min(remain,Number(b.qty)||0);b.qty-=take;remain-=take;}});if(remain>0)throw new Error("庫存不足");}
+    batches=batches.filter(b=>b.qty>0);if(batches.length)allLocs[loc]=batches;else delete allLocs[loc];const now=new Date().toISOString(),txnRef=db.collection("transactions").doc();tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId,type,qty,loc,batchDate:usedDate,date:todayStr(),operator:currentUser.name,editLog:[],unitCost:(type==="in"&&unitCost!=null&&Number.isFinite(unitCost))?unitCost:null,createdAt:now});
+  });await refreshTireViews();closeModal();
+}

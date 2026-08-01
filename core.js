@@ -578,6 +578,7 @@ function renderAvailabilityViews(){
   if(typeof renderKybMyOrders==="function") renderKybMyOrders();
 }
 function startStockReservationListener(){
+  startInventoryCustomerLookup();
   if(reservationsListenerStarted) return;
   reservationsListenerStarted = true;
   startRealtimeListener(()=>db.collection("stockReservations").where("status","==","active"), snap=>{
@@ -653,4 +654,36 @@ function startKybListeners(){
       myKybOrdersByName=snap.docs.map(d=>({id:d.id,...d.data()})); refreshMyKybOrders();
     });
   }
+}
+
+
+// ===== 第 5 批修正：交易只讀固定預留餘額文件，不使用交易內查詢 =====
+function reservationBalanceId(source,itemId,loc,batchDate){ return encodeURIComponent(makeReservationKey(source,itemId,loc,batchDate)); }
+function reservationBalanceRef(source,itemId,loc,batchDate){ return db.collection("stockReservationBalances").doc(reservationBalanceId(source,itemId,loc,batchDate)); }
+function reservationBalanceQty(snap){ return snap&&snap.exists?Math.max(0,Number((snap.data()||{}).reservedQty)||0):0; }
+function writeReservationBalance(tx,ref,source,itemId,loc,batchDate,qty){
+  tx.set(ref,{source,itemId,loc,batchDate:batchDate||null,reservationKey:makeReservationKey(source,itemId,loc,batchDate),reservedQty:Math.max(0,Number(qty)||0),updatedAt:new Date().toISOString()},{merge:true});
+}
+let inventoryCustomerLookupStarted=false;
+function startInventoryCustomerLookup(){
+  if(inventoryCustomerLookupStarted)return;
+  inventoryCustomerLookupStarted=true;
+  db.collection("erpParties").where("type","==","customer").onSnapshot(snap=>{
+    erpPartiesCache=snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.active!==false).sort((a,b)=>(a.name||"").localeCompare(b.name||"","zh-Hant"));
+  },err=>console.warn("客戶快速搜尋資料尚未取得：",err.message));
+}
+function bindOrderCustomerLookup(inputId,contactId,listId){
+  const input=document.getElementById(inputId),contact=document.getElementById(contactId),list=document.getElementById(listId);if(!input||!contact||!list)return;
+  const clear=()=>{delete input.dataset.partyId;delete input.dataset.partyCode;delete input.dataset.partyContact;};
+  const apply=party=>{
+    input.value=party.name||"";input.dataset.partyId=party.id||"";input.dataset.partyCode=party.partyCode||"";input.dataset.partyContact=party.contact||"";
+    const parts=[];if(party.contact)parts.push("聯絡人："+party.contact);if(party.phone)parts.push("電話："+party.phone);if(parts.length)contact.value=parts.join("　");list.classList.add("hidden");
+  };
+  input.addEventListener("input",()=>{
+    clear();const q=norm(input.value);if(!q){list.classList.add("hidden");return;}
+    const rows=(typeof erpPartiesCache==="undefined"?[]:erpPartiesCache).filter(p=>[p.partyCode,p.name,p.contact,p.phone].map(norm).join(" ").includes(q)).slice(0,8);
+    list.innerHTML=rows.map(p=>`<div data-id="${escapeHtml(p.id)}"><strong>${escapeHtml(p.partyCode||"未編號")}</strong>　${escapeHtml(p.name||"")}<br><small>${escapeHtml(p.contact||"")}　${escapeHtml(p.phone||"")}</small></div>`).join("");
+    list.classList.toggle("hidden",rows.length===0);
+    list.querySelectorAll("div").forEach(el=>el.addEventListener("click",()=>{const party=(typeof erpPartiesCache==="undefined"?[]:erpPartiesCache).find(p=>p.id===el.dataset.id);if(party)apply(party);}));
+  });
 }
