@@ -133,6 +133,7 @@ function renderKybMaster(){
 
   document.getElementById("kybMasterCount").textContent = `共 ${list.length} 筆`;
 
+  const canManage = userHasAnyRole("warehouse");
   const body = document.getElementById("kybMasterBody");
   body.innerHTML = list.map(it=>{
     const options = kybLocList(it);
@@ -151,14 +152,14 @@ function renderKybMaster(){
       <td class="editable-cell kyb-warranty-cell" data-id="${it.id}">${it.warrantyPrice!=null?it.warrantyPrice:"未填"}</td>
       <td class="editable-cell kyb-catalog-cell" data-id="${it.id}">${it.catalogPrice!=null?it.catalogPrice:"未填"}</td>
       <td>${escapeHtml(it.remark||"")}</td>
-      <td>${currentUser.role==='admin' ? `<button data-del="${it.id}" data-model="${escapeHtml(it.carModel)}">刪除</button>` : ""}</td>
+      <td>${canManage ? `<button data-del="${it.id}" data-model="${escapeHtml(it.carModel)}">刪除</button>` : ""}</td>
     </tr>`;
   }).join("") || `<tr><td colspan="11" class="empty">尚無資料</td></tr>`;
 
   body.querySelectorAll(".loc-line").forEach(el=>{
     el.addEventListener("click", ()=> openKybLocationModal(el.dataset.id, el.dataset.code));
   });
-  if(currentUser.role === "admin"){
+  if(canManage){
     body.querySelectorAll(".kyb-catalog-cell").forEach(td=> td.addEventListener("click", ()=> editKybPrice(td.dataset.id, "catalogPrice", "一線消費者售價")));
     body.querySelectorAll(".kyb-warranty-cell").forEach(td=> td.addEventListener("click", ()=> editKybPrice(td.dataset.id, "warrantyPrice", "保修廠價")));
     body.querySelectorAll("[data-del]").forEach(b=> b.addEventListener("click", ()=> deleteKybItem(b.dataset.del, b.dataset.model)));
@@ -169,7 +170,7 @@ function renderKybMaster(){
 }
 
 function deleteKybItem(itemId, carModel){
-  if(currentUser.role !== "admin") return;
+  if(!userHasAnyRole("warehouse")) return;
   const item = kybItemsCache.find(i=>i.id===itemId);
   if(!item) return;
   const qty = kybTotalQty(item);
@@ -223,7 +224,7 @@ function openKybLocationModal(itemId, code){
 }
 
 function editKybPrice(itemId, field, label){
-  if(currentUser.role !== "admin") return;
+  if(!userHasAnyRole("warehouse")) return;
   const item = kybItemsCache.find(i=>i.id===itemId);
   if(!item) return;
   const cur = item[field]!=null ? String(item[field]) : "";
