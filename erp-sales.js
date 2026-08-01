@@ -1,6 +1,7 @@
 // ERP 銷貨單、多品項明細與庫存銷貨帶入
 // 舊資料相容：沒有 lines 的舊銷貨單會自動視為一個品項。
 function erpTaxLabel(mode){ return ({no_tax:"不計稅",tax_included:"含稅",tax_excluded:"未稅外加"}[mode] || "不計稅"); }
+function erpCustomerParties(){ return erpPartiesCache.filter(p => (p.type || "customer") === "customer"); }
 
 async function confirmErpSalesOrder(id){
   if(!confirm("確認這張銷貨單？\n目前只改變狀態，不會扣庫存或建立帳款。")) return;
@@ -63,7 +64,7 @@ async function importErpSourceSale(source){
   const existing = erpSalesOrdersCache.find(o => o.sourceType === source.sourceType && o.sourceTransactionId === source.sourceTransactionId);
   if(existing){ erpSalesEditingId=existing.id; showErpView("sales"); return; }
   if(!confirm("帶入這筆" + (source.sourceType === "tire" ? "輪胎" : "KYB") + "銷貨？\n來源庫存不會被修改，也不會再次扣庫存。")) return;
-  const customer = erpCustomersCache.find(c => (c.name || "").trim() === source.customerName.trim());
+  const customer = erpCustomerParties().find(c => (c.name || "").trim() === source.customerName.trim());
   try{
     await db.collection("erpSalesOrders").add({
       orderNo:erpOrderNumber(), orderDate:source.date || todayStr(),
@@ -109,7 +110,7 @@ function renderErpSales(){
   const o=erpSalesEditingId?erpSalesOrdersCache.find(x=>x.id===erpSalesEditingId):null;
   const isSource=!!(o&&o.sourceTransactionId);
   const editable=!!(o&&isSource&&o.status!=="confirmed");
-  const customers=erpCustomersCache.map(c=>'<option value="'+erpEscape(c.id)+'"'+(o&&o.customerId===c.id?" selected":"")+">"+erpEscape(c.name)+"</option>").join("");
+  const customers=erpCustomerParties().map(c=>'<option value="'+erpEscape(c.id)+'"'+(o&&o.customerId===c.id?" selected":"")+">"+erpEscape(c.name)+"</option>").join("");
   const val=(k,f="")=>erpEscape(o&&o[k]!=null?o[k]:f);
   const sel=(k,x)=>o&&o[k]===x?" selected":"";
   const line=o?erpOrderLines(o)[0]:null;
@@ -147,12 +148,12 @@ function renderErpSales(){
   const refresh=()=>{const ls=getLines(),t=erpCalcLines(ls,form.elements.taxMode.value);document.getElementById("erpLineTotal").textContent=erpMoney(t.lineAmount);document.getElementById("erpSubtotalText").textContent="NT$ "+erpMoney(t.subtotal);document.getElementById("erpTaxText").textContent="NT$ "+erpMoney(t.taxAmount);document.getElementById("erpTotalText").textContent="NT$ "+erpMoney(t.totalAmount);document.getElementById("erpTaxRateText").textContent=t.taxRate?"5%":"0%";};
   form.addEventListener("input",refresh);
   form.elements.taxMode.addEventListener("change",refresh);
-  form.elements.customerId.addEventListener("change",()=>{const c=erpCustomersCache.find(x=>x.id===form.elements.customerId.value);if(c)form.elements.customerName.value=c.name;});
+  form.elements.customerId.addEventListener("change",()=>{const c=erpCustomerParties().find(x=>x.id===form.elements.customerId.value);if(c)form.elements.customerName.value=c.name;});
   document.getElementById("erpCancelEditBtn").addEventListener("click",()=>{erpSalesEditingId=null;renderErpSales();});
   document.getElementById("erpSaveDraftBtn").addEventListener("click",()=>saveErpMulti(form,getLines,"draft"));
   form.addEventListener("submit",e=>{e.preventDefault();saveErpMulti(form,getLines,"submitted");});
   refresh();
 }
-async function saveErpMulti(form,getLines,status){if(!form.reportValidity())return;const lines=getLines();if(!lines.length)return alert("請至少填寫一個品項。");const t=erpCalcLines(lines,form.elements.taxMode.value),customer=erpCustomersCache.find(c=>c.id===form.elements.customerId.value),data={orderNo:form.elements.orderNo.value.trim(),orderDate:form.elements.orderDate.value,customerId:customer?customer.id:null,customerName:form.elements.customerName.value.trim(),salesperson:form.elements.salesperson.value.trim(),taxMode:form.elements.taxMode.value,lines, itemSource:lines[0].itemSource,itemName:lines[0].itemName,quantity:lines[0].quantity,unitPrice:lines[0].unitPrice,lineAmount:t.lineAmount,amount:t.lineAmount,subtotalAmount:t.subtotal,taxAmount:t.taxAmount,totalAmount:t.totalAmount,taxRate:t.taxRate,notes:form.elements.notes.value.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};try{if(erpSalesEditingId){await db.collection("erpSalesOrders").doc(erpSalesEditingId).update({...data,status});erpSalesEditingId=null;}else{await db.collection("erpSalesOrders").add({...data,status,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});form.reset();} }catch(e){console.error(e);alert("儲存失敗，請稍後再試。");}}
+async function saveErpMulti(form,getLines,status){if(!form.reportValidity())return;const lines=getLines();if(!lines.length)return alert("請至少填寫一個品項。");const t=erpCalcLines(lines,form.elements.taxMode.value),customer=erpCustomerParties().find(c=>c.id===form.elements.customerId.value),data={orderNo:form.elements.orderNo.value.trim(),orderDate:form.elements.orderDate.value,customerId:customer?customer.id:null,customerName:form.elements.customerName.value.trim(),salesperson:form.elements.salesperson.value.trim(),taxMode:form.elements.taxMode.value,lines, itemSource:lines[0].itemSource,itemName:lines[0].itemName,quantity:lines[0].quantity,unitPrice:lines[0].unitPrice,lineAmount:t.lineAmount,amount:t.lineAmount,subtotalAmount:t.subtotal,taxAmount:t.taxAmount,totalAmount:t.totalAmount,taxRate:t.taxRate,notes:form.elements.notes.value.trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};try{if(erpSalesEditingId){await db.collection("erpSalesOrders").doc(erpSalesEditingId).update({...data,status});erpSalesEditingId=null;}else{await db.collection("erpSalesOrders").add({...data,status,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});form.reset();} }catch(e){console.error(e);alert("儲存失敗，請稍後再試。");}}
 
 async function deleteErpDraft(id){const o=erpSalesOrdersCache.find(x=>x.id===id);if(!o||o.status!=="draft")return;if(!confirm("刪除此銷貨草稿？此操作僅限未送出的草稿。"))return;try{await db.collection("erpSalesOrders").doc(id).delete();logErpAudit("sales_draft_deleted",id,{orderNo:o.orderNo});}catch(e){console.error(e);alert("刪除失敗。");}}
