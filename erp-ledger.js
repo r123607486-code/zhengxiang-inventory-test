@@ -45,7 +45,7 @@ function renderErpAccounting(){
     + '<section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">SETTLEMENT HISTORY</p><h2>收款沖帳歷程</h2></div><span class="erp-counter">'+settlements.length+' 筆</span></div>'
     + (settlements.length?'<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>日期</th><th>沖帳單號</th><th>往來對象</th><th>方式</th><th>參考資料</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead><tbody>'
       + settlements.map(row=>'<tr><td>'+erpEscape(row.settlementDate||"-")+'</td><td><strong>'+erpEscape(row.settlementNo||"-")+'</strong></td><td>'+erpEscape(row.partyName||"-")+'</td><td>'+erpEscape(row.method||"-")+'</td><td>'+erpEscape(row.referenceNo||"-")+'</td><td>NT$ '+erpMoney(row.amount)+'</td><td>'+erpEscape(row.status==="void"?"已作廢":row.legacy?"舊版保留":"有效")+'</td><td>'
-        + (!row.legacy&&row.status!=="void"?'<button class="erp-edit-btn" data-erp-edit-settlement="'+erpEscape(row.id)+'">修改</button><button class="erp-edit-btn" data-erp-void-settlement="'+erpEscape(row.id)+'">作廢</button>':'')
+        + (!row.legacy&&row.status!=="void"&&row.settlementType==="receipt"?'<button class="erp-edit-btn" data-erp-edit-settlement="'+erpEscape(row.id)+'">修改</button><button class="erp-edit-btn" data-erp-void-settlement="'+erpEscape(row.id)+'">作廢</button>':'')
         + '</td></tr>').join("")
       + '</tbody></table></div>':'<div class="erp-empty">尚無收款沖帳紀錄。</div>')
     + '</section>';

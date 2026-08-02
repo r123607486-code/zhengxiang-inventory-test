@@ -37,13 +37,13 @@ function renderKybTxns(){
     const label = item ? item.carModel : "(車型已刪除)";
     return `<tr>
       <td>${escapeHtml(t.date)}</td>
-      <td>${t.type==='in'?'進貨':'銷貨'}</td>
+      <td>${t.type==='in'?'進貨':t.type==='sales_return'?'銷貨退回入庫':t.type==='sales_return_void'?'銷貨退回作廢出庫':'銷貨'}</td>
       <td>${escapeHtml(label)}</td>
       <td>${t.qty}</td>
       <td>${escapeHtml(t.salesperson||"")}</td>
       <td>${escapeHtml(t.customerName||"")}</td>
       <td>${escapeHtml(t.operator||"")}</td>
-      <td><button data-edit="${t.id}">編輯</button> <button data-del="${t.id}">刪除</button></td>
+      <td>${(t.type==="sales_return"||t.type==="sales_return_void")?'<span class="erp-form-hint">由 ERP 退回單管理</span>':'<button data-edit="${t.id}">編輯</button> <button data-del="${t.id}">刪除</button>'}</td>
     </tr>`;
   }).join("") || `<tr><td colspan="8" class="empty">尚無紀錄</td></tr>`;
 

@@ -30,7 +30,7 @@ function erpInvoiceLinesForOrder(order){
       subtotalAmount=rawTotal>0?Math.round(total.subtotal*(raw/rawTotal)):0;
       allocated+=subtotalAmount;
     }
-    return {saleOrderId:order.id,orderNo:order.orderNo,orderDate:order.orderDate,itemName:line.itemName,quantity:Number(line.quantity)||0,unitPrice:Number(line.unitPrice)||0,subtotalAmount};
+    return {saleOrderId:order.id,orderNo:order.orderNo,orderDate:order.orderDate,sourceTransactionId:order.sourceTransactionId||"",itemSource:line.itemSource||order.itemSource||order.sourceType||"custom",itemId:line.itemId||order.itemId||"",itemName:line.itemName,quantity:Number(line.quantity)||0,unitPrice:Number(line.unitPrice)||0,subtotalAmount};
   });
 }
 function renderErpInvoices(){

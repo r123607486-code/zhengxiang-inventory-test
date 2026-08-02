@@ -6,7 +6,7 @@ function erpStatementDateInRange(date,from,to){
 function erpStatementSources(){
   const ledgers=erpAccountingAllVisibleLedgers().filter(row=>row.direction==="receivable"&&row.status!=="void");
   const migrated=new Set(erpLedgerCache.filter(row=>row.legacySourceId).map(row=>row.legacySourceId));
-  const settlements=erpSettlementsCache.filter(row=>row.status!=="void"&&(row.settlementType==="receipt"||row.direction==="in")).map(row=>({...row,legacy:false}));
+  const settlements=erpSettlementsCache.filter(row=>row.status!=="void"&&(row.settlementType==="receipt"||row.settlementType==="return_credit"||row.direction==="in"||row.direction==="credit")).map(row=>({...row,legacy:false}));
   const legacy=erpReceiptsCache.filter(row=>{
     const allocation=Array.isArray(row.allocations)?row.allocations[0]:null;
     return !row.voided&&!(allocation&&migrated.has(allocation.receivableId));
@@ -34,7 +34,7 @@ function erpStatementData(filter){
     date:row.documentDate,kind:"應收",documentNo:row.sourceDocumentNo||row.ledgerNo,description:row.notes||"月結發票",debit:erpAccountingNumber(row.originalAmount),credit:0
   }));
   const credits=settlements.filter(row=>erpStatementDateInRange(row.settlementDate,filter.from,filter.to)).map(row=>({
-    date:row.settlementDate,kind:"收款",documentNo:row.settlementNo||"-",description:(row.method||"")+" "+(row.referenceNo||""),debit:0,credit:erpAccountingNumber(row.amount)
+    date:row.settlementDate,kind:row.settlementType==="return_credit"?"退回／折讓":"收款",documentNo:row.settlementNo||"-",description:(row.method||"")+" "+(row.referenceNo||""),debit:0,credit:erpAccountingNumber(row.amount)
   }));
   const rows=charges.concat(credits).sort((a,b)=>(a.date||"").localeCompare(b.date||"")||(a.kind==="應收"?-1:1));
   let balance=opening;

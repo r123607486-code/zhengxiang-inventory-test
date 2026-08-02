@@ -30,7 +30,7 @@ function erpSourceItemLabel(sourceType, transaction){
 function erpSalesSources(){
   const make = (sourceType, list) => list.filter(t => t.type === "out").map(t => ({
     key:sourceType + ":" + t.id, sourceType, sourceTransactionId:t.id,
-    date:t.date || "", quantity:Number(t.qty)||0, customerName:t.customerName || "",
+    date:t.date || "", quantity:Number(t.qty)||0, itemId:t.itemId || "", customerName:t.customerName || "",
     customerContact:t.customerContact || "", notes:t.customerNote || "",
     salesperson:t.salesperson || t.operator || "", itemName:erpSourceItemLabel(sourceType,t),
     ...salesPricingStoredFields({...t,itemSource:sourceType}, Number(t.qty)||0)
@@ -71,7 +71,8 @@ async function importErpSourceSale(source){
       orderNo:erpOrderNumber(), orderDate:source.date || todayStr(),
       customerId:customer ? customer.id : null, customerCode:customer ? (customer.partyCode || "") : "", customerName:source.customerName || "",
       taxMode:source.taxMode || "no_tax", salesperson:source.salesperson, itemSource:source.sourceType,
-      itemName:source.itemName, quantity:source.quantity,
+      itemId:source.itemId || "", itemName:source.itemName, quantity:source.quantity,
+      lines:[{itemSource:source.sourceType,itemId:source.itemId || "",itemName:source.itemName,quantity:source.quantity,unitPrice:Number(source.unitPrice)||0}],
       ...salesPricingStoredFields({...source,itemSource:source.sourceType}, source.quantity),
       amount:Number(source.lineAmount)||0,
       notes:source.notes || "", status:"draft", sourceType:source.sourceType,
@@ -91,7 +92,7 @@ async function importErpSourceSale(source){
 
 function erpOrderLines(o){
   if(Array.isArray(o.lines)&&o.lines.length)return o.lines;
-  return [{itemSource:o.itemSource||"custom",itemName:o.itemName||"",quantity:Number(o.quantity)||0,unitPrice:Number(o.unitPrice)||0}];
+  return [{itemSource:o.itemSource||"custom",itemId:o.itemId||"",itemName:o.itemName||"",quantity:Number(o.quantity)||0,unitPrice:Number(o.unitPrice)||0}];
 }
 function erpCalcLines(lines,mode){
   const lineAmount=lines.reduce((s,l)=>s+(Number(l.quantity)||0)*(Number(l.unitPrice)||0),0);

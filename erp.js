@@ -21,6 +21,8 @@ let erpInvoicesCache = [];
 let erpInvoiceFilter = { customerName:"", from:"", to:"", seriesId:"" };
 let erpInvoiceSeriesCache = [];
 let erpStatementFilter = { partyName:"", from:"", to:"" };
+let erpSalesReturnsCache = [];
+let erpReturnFilter = { invoiceId:"" };
 let erpReceivablesCache = [];
 let erpReceiptsCache = [];
 let erpLedgerCache = [];
@@ -97,6 +99,7 @@ function buildErpWorkspace(){
         <button class="erp-nav" data-erp-view="transfers">${ERP_ICONS.transfer}<span>待建立銷貨單</span></button>
         <button class="erp-nav" data-erp-view="invoices">${ERP_ICONS.sales}<span>發票管理</span></button>
         <button class="erp-nav" data-erp-view="statements">${ERP_ICONS.sales}<span>客戶對帳單</span></button>
+        <button class="erp-nav" data-erp-view="returns">${ERP_ICONS.transfer}<span>退回與折讓</span></button>
         <button class="erp-nav" data-erp-view="accounting">${ERP_ICONS.customers}<span>帳務與收款</span></button>
         <div class="erp-sidebar-note">帳務基礎<br>通用帳・沖帳・票據</div>
       </aside>
@@ -107,6 +110,7 @@ function buildErpWorkspace(){
         <section class="erp-page hidden" id="erp-page-transfers"></section>
         <section class="erp-page hidden" id="erp-page-invoices"></section>
         <section class="erp-page hidden" id="erp-page-statements"></section>
+        <section class="erp-page hidden" id="erp-page-returns"></section>
         <section class="erp-page hidden" id="erp-page-accounting"></section>
       </main>
     </div>`;
@@ -150,6 +154,9 @@ function startErpListeners(){
   db.collection("erpInvoiceSeries").onSnapshot(snap => {
     erpInvoiceSeriesCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
   },err=>console.error("ERP 發票字軌讀取失敗",err));
+  db.collection("erpSalesReturns").onSnapshot(snap => {
+    erpSalesReturnsCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
+  },err=>console.error("ERP 銷貨退回讀取失敗",err));
   db.collection("erpReceivables").onSnapshot(snap => {
     erpReceivablesCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
   },err=>console.error("ERP 應收帳款讀取失敗",err));
@@ -198,6 +205,7 @@ function renderErpViews(){
   renderErpTransfers();
   renderErpInvoices();
   renderErpStatements();
+  renderErpReturns();
   renderErpAccounting();
 }
 
