@@ -102,6 +102,7 @@ function buildErpWorkspace(){
         <button class="erp-nav" data-erp-view="invoices">${ERP_ICONS.sales}<span>發票管理</span></button>
         <button class="erp-nav" data-erp-view="statements">${ERP_ICONS.sales}<span>客戶對帳單</span></button>
         <button class="erp-nav" data-erp-view="returns">${ERP_ICONS.transfer}<span>退回與折讓</span></button>
+        <button class="erp-nav" data-erp-view="profitability">${ERP_ICONS.dashboard}<span>成本與毛利</span></button>
         <button class="erp-nav" data-erp-view="purchases">${ERP_ICONS.transfer}<span>進貨單與應付</span></button>
         <button class="erp-nav" data-erp-view="accounting">${ERP_ICONS.customers}<span>帳務與收款</span></button>
         <div class="erp-sidebar-note">帳務基礎<br>通用帳・沖帳・票據</div>
@@ -115,6 +116,7 @@ function buildErpWorkspace(){
         <section class="erp-page hidden" id="erp-page-invoices"></section>
         <section class="erp-page hidden" id="erp-page-statements"></section>
         <section class="erp-page hidden" id="erp-page-returns"></section>
+        <section class="erp-page hidden" id="erp-page-profitability"></section>
         <section class="erp-page hidden" id="erp-page-purchases"></section>
         <section class="erp-page hidden" id="erp-page-accounting"></section>
       </main>
@@ -215,6 +217,7 @@ function renderErpViews(){
   renderErpInvoices();
   renderErpStatements();
   renderErpReturns();
+  renderErpProfitability();
   renderErpPurchases();
   renderErpAccounting();
 }
