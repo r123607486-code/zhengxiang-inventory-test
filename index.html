@@ -109,7 +109,7 @@
       </div>
       <div class="table-wrap">
         <table class="grid">
-          <thead><tr><th>品牌</th><th>型號</th><th>規格</th><th>總量</th><th>儲位分布（點擊各儲位可調整生產日期／搬倉）</th><th>20%</th><th>售價</th><th>備註</th><th>操作</th></tr></thead>
+          <thead><tr><th>品牌</th><th>型號</th><th>規格</th><th>總量</th><th>儲位分布（點擊各儲位可調整生產日期／搬倉）</th><th data-price-headers="tire"></th><th>備註</th><th>操作</th></tr></thead>
           <tbody id="masterBody"></tbody>
         </table>
       </div>
@@ -233,7 +233,7 @@
       </div>
       <div class="table-wrap">
         <table class="grid">
-          <thead><tr><th>車型</th><th>廠牌</th><th>避震款式</th><th>總量</th><th>儲位分布（點擊可調整／搬倉）</th><th>年份代碼</th><th>料號</th><th>保修廠價</th><th>一線消費者售價</th><th>備註</th><th>操作</th></tr></thead>
+          <thead><tr><th>車型</th><th>廠牌</th><th>避震款式</th><th>總量</th><th>儲位分布（點擊可調整／搬倉）</th><th>年份代碼</th><th>料號</th><th data-price-headers="kyb"></th><th>備註</th><th>操作</th></tr></thead>
           <tbody id="kybMasterBody"></tbody>
         </table>
       </div>
@@ -337,7 +337,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script src="firebase-config.js"></script>
-<script src="core.js?v=batch5-fix1"></script>
+<script src="core.js?v=review-fix1"></script>
 <script src="sales-pricing.js?v=pricing1"></script>
 <script src="erp-shipment-sync.js?v=shipment1"></script>
 <script src="modal-shared.js"></script>
@@ -349,21 +349,21 @@
 <script src="handover-backup.js"></script>
 <script src="kyb-inventory.js?v=pricing1"></script>
 <script src="kyb-transactions-orders.js?v=shipment1"></script>
-<script src="erp.js?v=profit1"></script>
+<script src="erp.js?v=review-fix1"></script>
 <script src="erp-accounting-core.js?v=accounting1"></script>
 <script src="erp-instruments.js?v=accounting1"></script>
 <script src="erp-settlements.js?v=accounting1"></script>
 <script src="erp-ledger.js?v=accounting1"></script>
-<script src="erp-customers.js?v=16637b7b"></script>
+<script src="erp-customers.js?v=review-fix1"></script>
 <script src="erp-sales.js?v=pricing1"></script>
 <script src="erp-invoice-series.js?v=invoice2"></script>
 <script src="erp-invoicing.js?v=invoice2"></script>
 <script src="erp-statements.js?v=invoice2"></script>
 <script src="erp-returns.js?v=returns3"></script>
 <script src="erp-profitability.js?v=profit1"></script>
-<script src="erp-vendors.js?v=payable4"></script>
+<script src="erp-vendors.js?v=review-fix1"></script>
 <script src="erp-purchases.js?v=payable4"></script>
 <script src="erp-print.js"></script>
-<script src="erp-receivables.js"></script>
+<script src="erp-receivables.js?v=review-fix1"></script>
 </body>
 </html>
