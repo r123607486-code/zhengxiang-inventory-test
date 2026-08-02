@@ -1,107 +1,62 @@
 // ============================================================
 // 輪胎：庫存查詢 / 庫存總表 / 儲位與價格編輯 / 匯出
+// ------------------------------------------------------------
+// 叫貨流程：查詢頁的「叫貨」只把品項加進購物車（order-cart.js），
+// 客戶資料與實際送出、庫存預留都在購物車結帳時一次完成。
 // ============================================================
 document.getElementById("queryBox").addEventListener("input", ()=>{ queryVisibleCount = 200; renderQuery(); });
 
 function renderQuery(){
-  const box = document.getElementById("queryResults");
-  const countEl = document.getElementById("queryCount");
-  const q = norm(document.getElementById("queryBox").value);
-
-  let list = itemsCache.slice();
-  if(q) list = list.filter(it=> norm(it.spec).includes(q) || norm(it.model).includes(q) || norm(it.brand).includes(q));
-  const sortRank = (it)=> hasPendingStock(it) ? 0 : (totalQty(it)>0 ? 1 : 2);
-  list.sort((a,b)=> sortRank(a) - sortRank(b));
-
-  const inStockCount = list.filter(it=>totalQty(it)>0).length;
-  countEl.textContent = q ? `找到 ${list.length} 筆（有庫存 ${inStockCount} 筆）` : `共 ${list.length} 筆品項（有庫存 ${inStockCount} 筆）`;
-
-  box.innerHTML = list.slice(0,queryVisibleCount).map(it=>{
-    const qty = totalQty(it);
-    const noStock = qty <= 0;
-    const pending = hasPendingStock(it);
-    return `<div class="card${noStock?' card-nostock':''}${pending?' card-pending':''}">
-      <div class="code-row">
-        <div class="code">${escapeHtml(it.spec)}${pending?'<span class="pending-tag">尚未入庫</span>':''}</div>
-        ${noStock ? '' : `<button class="order-btn" data-id="${it.id}">${ICONS.cart}叫貨</button>`}
-      </div>
+  const box=document.getElementById("queryResults"), countEl=document.getElementById("queryCount");
+  if(!box||!countEl) return;
+  const q=norm(document.getElementById("queryBox").value);
+  let list=itemsCache.slice();
+  if(q) list=list.filter(it=>norm(it.spec).includes(q)||norm(it.model).includes(q)||norm(it.brand).includes(q));
+  const sortRank=it=>hasPendingStock(it)?0:(tireAvailableTotal(it)>0?1:2);
+  list.sort((a,b)=>sortRank(a)-sortRank(b));
+  const inStockCount=list.filter(it=>tireAvailableTotal(it)>0).length;
+  countEl.textContent=q?`找到 ${list.length} 筆（可用 ${inStockCount} 筆）`:`共 ${list.length} 筆品項（可用 ${inStockCount} 筆）`;
+  box.innerHTML=list.slice(0,queryVisibleCount).map(it=>{
+    const physical=totalQty(it), reserved=tireReservedTotal(it), available=tireAvailableTotal(it);
+    const unavailable=available<=0, pending=hasPendingStock(it);
+    return `<div class="card${unavailable?' card-nostock':''}${pending?' card-pending':''}">
+      <div class="code-row"><div class="code">${escapeHtml(it.spec)}${pending?'<span class="pending-tag">尚未入庫</span>':''}</div>
+      ${unavailable?'':`<button class="order-btn" data-id="${it.id}">${ICONS.cart}加入購物車</button>`}</div>
       <div class="sub">${escapeHtml(it.brand)}　${escapeHtml(it.model||"")}</div>
-      <div class="qty">庫存 ${qty}${it.twenty!=null?`　　20% ${it.twenty}`:""}${it.sellPrice!=null?`　　售價 ${it.sellPrice}`:""}</div>
-      <div class="sub">儲位：${escapeHtml(locSummary(it))}</div>
-    </div>`;
-  }).join("") || `<div class="empty">查無符合的品項</div>`;
-
-  if(list.length > queryVisibleCount){
-    box.innerHTML += `<button id="queryLoadMoreBtn" class="load-more-btn">顯示更多（還有 ${list.length - queryVisibleCount} 筆，目前顯示 ${queryVisibleCount} 筆）</button>`;
-  }
-
-  box.querySelectorAll(".order-btn").forEach(b=>{
-    b.addEventListener("click", ()=> openOrderModal(b.dataset.id));
-  });
-  const queryLoadMoreBtn = document.getElementById("queryLoadMoreBtn");
-  if(queryLoadMoreBtn) queryLoadMoreBtn.addEventListener("click", ()=>{ queryVisibleCount += 200; renderQuery(); });
+      <div class="qty">庫存 ${physical}　預留 ${reserved}　<span style="color:#2e7d32;font-weight:700;">可用 ${available}</span>${it.twenty!=null?`　　20% ${it.twenty}`:""}${it.sellPrice!=null?`　　售價 ${it.sellPrice}`:""}</div>
+      <div class="sub">儲位：${escapeHtml(locSummary(it))}</div></div>`;
+  }).join("")||`<div class="empty">查無符合的品項</div>`;
+  if(list.length>queryVisibleCount) box.innerHTML+=`<button id="queryLoadMoreBtn" class="load-more-btn">顯示更多（還有 ${list.length-queryVisibleCount} 筆，目前顯示 ${queryVisibleCount} 筆）</button>`;
+  box.querySelectorAll(".order-btn").forEach(b=>b.addEventListener("click",()=>openOrderModal(b.dataset.id)));
+  const more=document.getElementById("queryLoadMoreBtn"); if(more) more.addEventListener("click",()=>{queryVisibleCount+=200;renderQuery();});
 }
 
+// 加入購物車：這裡只決定「哪個品項、哪個批次、幾條、多少錢」，不問客戶、也還不會預留庫存。
 function openOrderModal(itemId){
-  const item = itemsCache.find(i=>i.id===itemId);
-  if(!item) return;
-  const options = locDetailList(item);
-  const totalAvail = totalQty(item);
-  const html = `
-    <div class="sheet-head"><h2>叫貨：${escapeHtml(item.spec)}</h2><button class="sheet-close" onclick="closeModal()">✕</button></div>
+  const item=itemsCache.find(i=>i.id===itemId); if(!item) return;
+  const options=locDetailList(item).map(o=>({...o,available:tireAvailableAt(item,o.code,o.date)})).filter(o=>o.available>0);
+  const physical=totalQty(item), reserved=tireReservedTotal(item), available=tireAvailableTotal(item);
+  const html=`<div class="sheet-head"><h2>加入購物車：${escapeHtml(item.spec)}</h2><button class="sheet-close" onclick="closeModal()">✕</button></div>
     <div class="form-row"><label>品牌／型號</label><input type="text" value="${escapeHtml(item.brand)} ${escapeHtml(item.model||'')}" disabled></div>
-    <div class="form-row"><label>目前總庫存</label><input type="text" value="${totalAvail}" disabled></div>
-    <div class="form-row"><label>選擇儲位／批次</label>
-      <select id="orderLoc">${options.length ? options.map((o,i)=>`<option value="${i}">${escapeHtml(o.code)}${o.date?`（${escapeHtml(o.date)}）`:''}（目前${o.qty}）</option>`).join("") : `<option value="">目前無庫存</option>`}</select>
-    </div>
-    <div class="form-row"><label>數量</label>
-      <select id="orderQty"></select>
-    </div>
-    <div class="form-row"><label>客戶姓名（可輸入關鍵字搜尋並點選帶入）</label><input type="text" id="orderCustomerName" autocomplete="off"><div class="autocomplete-list hidden" id="orderCustomerList"></div></div>
-    <div class="form-row"><label>聯絡方式</label><input type="text" id="orderCustomerContact"></div>
-    <div class="form-row"><label>備註</label><input type="text" id="orderCustomerNote"></div>
-    <div class="form-actions">
-      <button onclick="closeModal()">取消</button>
-      <button class="primary" id="orderSubmitBtn">送出叫貨</button>
-    </div>`;
+    <div class="form-row"><label>庫存狀態</label><input type="text" value="實際庫存 ${physical}　已預留 ${reserved}　可用 ${available}" disabled></div>
+    <div class="form-row"><label>選擇儲位／批次</label><select id="orderLoc">${options.length?options.map((o,i)=>`<option value="${i}">${escapeHtml(o.code)}${o.date?`（${escapeHtml(o.date)}）`:''}（庫存 ${o.qty}／可用 ${o.available}）</option>`).join(""):`<option value="">目前沒有可用庫存</option>`}</select></div>
+    <div class="form-row"><label>數量</label><select id="orderQty"></select></div>
+    <section class="sales-pricing-box" id="tireOrderPriceBox" data-sales-source="tire"><div class="sales-pricing-title">銷售金額與稅別</div><div class="form-row"><label>套用價目表</label><select id="tireOrderPricePriceList"><option value="">請先選擇品項</option></select></div><div class="form-row"><label>單價</label><input type="number" min="0" step="1" inputmode="numeric" id="tireOrderPriceUnitPrice" placeholder="請輸入實際成交單價"></div><div class="form-row"><label>稅別</label><select id="tireOrderPriceTaxMode"><option value="no_tax">不計稅</option><option value="tax_included">稅內含（5%）</option><option value="tax_excluded">稅外加（5%）</option></select></div><div class="sales-pricing-summary" id="tireOrderPriceSummary"></div></section>
+    <div class="note">客戶資料在購物車結帳時填一次就好。按下「加入購物車」還不會預留庫存，要按送出才會。</div>
+    <div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="orderSubmitBtn">加入購物車</button></div>`;
   openModal(html);
-
-  function refreshQtyOptions(){
-    const idx = Number(document.getElementById("orderLoc").value);
-    const opt = options[idx];
-    const qtySelect = document.getElementById("orderQty");
-    if(!opt){ qtySelect.innerHTML = `<option value="0">目前無庫存</option>`; return; }
-    qtySelect.innerHTML = Array.from({length:opt.qty},(_,i)=>i+1).map(n=>`<option value="${n}">${n}</option>`).join("");
-  }
-  const locSelect = document.getElementById("orderLoc");
-  if(options.length) locSelect.addEventListener("change", refreshQtyOptions);
-  refreshQtyOptions();
-
-  document.getElementById("orderSubmitBtn").addEventListener("click", async ()=>{
-    const idx = Number(document.getElementById("orderLoc").value);
-    const opt = options[idx];
-    const qty = Number(document.getElementById("orderQty").value);
-    const customerName = document.getElementById("orderCustomerName").value.trim();
-    const customerContact = document.getElementById("orderCustomerContact").value.trim();
-    const customerNote = document.getElementById("orderCustomerNote").value.trim();
-    if(!opt){ alert("這個品項目前沒有庫存可以叫貨"); return; }
-    if(!qty || qty<=0){ alert("請輸入正確的數量"); return; }
-    if(qty > opt.qty){ alert(`這一批目前只有 ${opt.qty}，不能叫超過這個數量`); return; }
-    if(!customerName){ alert("請輸入客戶姓名"); return; }
-    try{
-      await db.collection("orders").add({
-        itemId: item.id,
-        itemLabel: `${item.brand} ${item.spec}（${item.model||""}）`,
-        qty, loc: opt.code, batchDate: opt.date || null,
-        customerName, customerContact, customerNote,
-        requestedByUid: currentUser.uid, requestedByName: currentUser.name,
-        status: "pending", requestedAt: new Date().toISOString()
-      });
-      closeModal();
-      alert("已送出，等待管理者確認出貨。");
-    }catch(e){
-      alert("送出失敗："+e.message);
-    }
+  const orderPricing=bindSalesPricing("tireOrderPrice","tire",()=>item,()=>Number(document.getElementById("orderQty").value)||0,null,"orderQty");
+  const refresh=()=>{const opt=options[Number(document.getElementById("orderLoc").value)], el=document.getElementById("orderQty"); el.innerHTML=opt?Array.from({length:opt.available},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join(""):`<option value="0">目前無可用庫存</option>`;orderPricing.refresh();};
+  if(options.length) document.getElementById("orderLoc").addEventListener("change",refresh); refresh();
+  document.getElementById("orderSubmitBtn").addEventListener("click",()=>{
+    const opt=options[Number(document.getElementById("orderLoc").value)], qty=Number(document.getElementById("orderQty").value);
+    if(!opt||!qty||qty<=0){alert("請選擇有可用量的儲位與數量");return;}
+    let pricing;try{pricing=readSalesPricing("tireOrderPrice",qty);}catch(e){alert(e.message);return;}
+    addOrderCartLine({
+      source:"tire", itemId:item.id, itemLabel:`${item.brand} ${item.spec}（${item.model||""}）`,
+      qty, loc:opt.code, batchDate:opt.date||null, ...pricing
+    });
+    closeModal();
   });
 }
 
@@ -276,80 +231,4 @@ function exportItemsToExcel(list, filename){
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "資料");
   XLSX.writeFile(wb, `${filename}_${todayStr()}.xlsx`);
-}
-
-
-// ===== 第 5 批：輪胎叫貨時建立預留 =====
-async function createReservedTireOrder(data){
-  const orderRef=db.collection("orders").doc();
-  const reservationRef=db.collection("stockReservations").doc();
-  const reservationKey=makeReservationKey("tire",data.itemId,data.loc,data.batchDate);
-  await db.runTransaction(async tx=>{
-    const itemRef=db.collection("items").doc(data.itemId);
-    const balanceRef=reservationBalanceRef("tire",data.itemId,data.loc,data.batchDate);
-    const itemSnap=await tx.get(itemRef);
-    const balanceSnap=await tx.get(balanceRef);
-    if(!itemSnap.exists) throw new Error("找不到品項，請重新整理後再試一次");
-    const actual=tireStockAt({id:data.itemId,...itemSnap.data()},data.loc,data.batchDate);
-    const reserved=reservationBalanceQty(balanceSnap);
-    if(data.qty>actual-reserved) throw new Error(`這一批可用庫存只剩 ${Math.max(0,actual-reserved)}，請重新選擇數量或儲位`);
-    const now=new Date().toISOString();
-    tx.set(orderRef,{...data,status:"pending",reservationId:reservationRef.id,reservationStatus:"active",requestedAt:now});
-    tx.set(reservationRef,{source:"tire",orderId:orderRef.id,itemId:data.itemId,loc:data.loc,batchDate:data.batchDate||null,qty:data.qty,reservationKey,balanceId:balanceRef.id,status:"active",reservedByUid:currentUser.uid,reservedByName:currentUser.name,createdAt:now});
-    writeReservationBalance(tx,balanceRef,"tire",data.itemId,data.loc,data.batchDate,reserved+data.qty);
-  });
-}
-function renderQuery(){
-  const box=document.getElementById("queryResults"), countEl=document.getElementById("queryCount");
-  if(!box||!countEl) return;
-  const q=norm(document.getElementById("queryBox").value);
-  let list=itemsCache.slice();
-  if(q) list=list.filter(it=>norm(it.spec).includes(q)||norm(it.model).includes(q)||norm(it.brand).includes(q));
-  const sortRank=it=>hasPendingStock(it)?0:(tireAvailableTotal(it)>0?1:2);
-  list.sort((a,b)=>sortRank(a)-sortRank(b));
-  const inStockCount=list.filter(it=>tireAvailableTotal(it)>0).length;
-  countEl.textContent=q?`找到 ${list.length} 筆（可用 ${inStockCount} 筆）`:`共 ${list.length} 筆品項（可用 ${inStockCount} 筆）`;
-  box.innerHTML=list.slice(0,queryVisibleCount).map(it=>{
-    const physical=totalQty(it), reserved=tireReservedTotal(it), available=tireAvailableTotal(it);
-    const unavailable=available<=0, pending=hasPendingStock(it);
-    return `<div class="card${unavailable?' card-nostock':''}${pending?' card-pending':''}">
-      <div class="code-row"><div class="code">${escapeHtml(it.spec)}${pending?'<span class="pending-tag">尚未入庫</span>':''}</div>
-      ${unavailable?'':`<button class="order-btn" data-id="${it.id}">${ICONS.cart}叫貨</button>`}</div>
-      <div class="sub">${escapeHtml(it.brand)}　${escapeHtml(it.model||"")}</div>
-      <div class="qty">庫存 ${physical}　預留 ${reserved}　<span style="color:#2e7d32;font-weight:700;">可用 ${available}</span>${it.twenty!=null?`　　20% ${it.twenty}`:""}${it.sellPrice!=null?`　　售價 ${it.sellPrice}`:""}</div>
-      <div class="sub">儲位：${escapeHtml(locSummary(it))}</div></div>`;
-  }).join("")||`<div class="empty">查無符合的品項</div>`;
-  if(list.length>queryVisibleCount) box.innerHTML+=`<button id="queryLoadMoreBtn" class="load-more-btn">顯示更多（還有 ${list.length-queryVisibleCount} 筆，目前顯示 ${queryVisibleCount} 筆）</button>`;
-  box.querySelectorAll(".order-btn").forEach(b=>b.addEventListener("click",()=>openOrderModal(b.dataset.id)));
-  const more=document.getElementById("queryLoadMoreBtn"); if(more) more.addEventListener("click",()=>{queryVisibleCount+=200;renderQuery();});
-}
-function openOrderModal(itemId){
-  const item=itemsCache.find(i=>i.id===itemId); if(!item) return;
-  const options=locDetailList(item).map(o=>({...o,available:tireAvailableAt(item,o.code,o.date)})).filter(o=>o.available>0);
-  const physical=totalQty(item), reserved=tireReservedTotal(item), available=tireAvailableTotal(item);
-  const html=`<div class="sheet-head"><h2>叫貨：${escapeHtml(item.spec)}</h2><button class="sheet-close" onclick="closeModal()">✕</button></div>
-    <div class="form-row"><label>品牌／型號</label><input type="text" value="${escapeHtml(item.brand)} ${escapeHtml(item.model||'')}" disabled></div>
-    <div class="form-row"><label>庫存狀態</label><input type="text" value="實際庫存 ${physical}　已預留 ${reserved}　可用 ${available}" disabled></div>
-    <div class="form-row"><label>選擇儲位／批次</label><select id="orderLoc">${options.length?options.map((o,i)=>`<option value="${i}">${escapeHtml(o.code)}${o.date?`（${escapeHtml(o.date)}）`:''}（庫存 ${o.qty}／可用 ${o.available}）</option>`).join(""):`<option value="">目前沒有可用庫存</option>`}</select></div>
-    <div class="form-row"><label>數量</label><select id="orderQty"></select></div>
-    <div class="form-row"><label>客戶姓名（可輸入關鍵字搜尋並點選帶入）</label><input type="text" id="orderCustomerName" autocomplete="off"><div class="autocomplete-list hidden" id="orderCustomerList"></div></div>
-    <div class="form-row"><label>聯絡方式</label><input type="text" id="orderCustomerContact"></div>
-    <div class="form-row"><label>備註</label><input type="text" id="orderCustomerNote"></div>
-    <section class="sales-pricing-box" id="tireOrderPriceBox" data-sales-source="tire"><div class="sales-pricing-title">銷售金額與稅別</div><div class="form-row"><label>套用價目表</label><select id="tireOrderPricePriceList"><option value="">請先選擇品項</option></select></div><div class="form-row"><label>單價</label><input type="number" min="0" step="1" inputmode="numeric" id="tireOrderPriceUnitPrice" placeholder="請輸入實際成交單價"></div><div class="form-row"><label>稅別</label><select id="tireOrderPriceTaxMode"><option value="no_tax">不計稅</option><option value="tax_included">稅內含（5%）</option><option value="tax_excluded">稅外加（5%）</option></select></div><div class="sales-pricing-summary" id="tireOrderPriceSummary"></div></section>
-    <div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="orderSubmitBtn">送出並預留</button></div>`;
-  openModal(html);
-  bindOrderCustomerLookup("orderCustomerName","orderCustomerContact","orderCustomerList");
-  const orderPricing=bindSalesPricing("tireOrderPrice","tire",()=>item,()=>Number(document.getElementById("orderQty").value)||0,null,"orderQty");
-  const refresh=()=>{const opt=options[Number(document.getElementById("orderLoc").value)], el=document.getElementById("orderQty"); el.innerHTML=opt?Array.from({length:opt.available},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join(""):`<option value="0">目前無可用庫存</option>`;orderPricing.refresh();};
-  if(options.length) document.getElementById("orderLoc").addEventListener("change",refresh); refresh();
-  document.getElementById("orderSubmitBtn").addEventListener("click",async()=>{
-    const opt=options[Number(document.getElementById("orderLoc").value)], qty=Number(document.getElementById("orderQty").value);
-    const customerInput=document.getElementById("orderCustomerName");
-    const customerName=customerInput.value.trim(),customerContact=document.getElementById("orderCustomerContact").value.trim(),customerNote=document.getElementById("orderCustomerNote").value.trim();
-    const customerId=customerInput.dataset.partyId||null,customerCode=customerInput.dataset.partyCode||"",customerContactPerson=customerInput.dataset.partyContact||"";
-    if(!opt||!qty||qty<=0){alert("請選擇有可用量的儲位與數量");return;} if(!customerName){alert("請輸入客戶姓名");return;}
-    let pricing;try{pricing=readSalesPricing("tireOrderPrice",qty);}catch(e){alert(e.message);return;}
-    try{await createReservedTireOrder({itemId:item.id,itemLabel:`${item.brand} ${item.spec}（${item.model||""}）`,qty,loc:opt.code,batchDate:opt.date||null,customerId,customerCode,customerContactPerson,customerName,customerContact,customerNote,...pricing,requestedByUid:currentUser.uid,requestedByName:currentUser.name});closeModal();alert("已送出，庫存已預留，等待倉管確認出貨。");}
-    catch(e){alert("送出失敗："+e.message);}
-  });
 }
