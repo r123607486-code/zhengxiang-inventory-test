@@ -59,6 +59,14 @@ const PRICE_TEMPLATES = {
     {key:"catalogPrice", label:"一線消費者售價"}
   ]
 };
+// 庫存總表的價格欄位表頭也由模板產生，避免以後改模板時「表頭」跟「內容」欄位數量對不上。
+// index.html 只放一個 <th data-price-headers="tire">，載入時會被展開成對應數量的表頭。
+function applyPriceTemplateHeaders(){
+  document.querySelectorAll("[data-price-headers]").forEach(cell=>{
+    const defs = (PRICE_TEMPLATES && PRICE_TEMPLATES[cell.dataset.priceHeaders]) || [];
+    cell.outerHTML = defs.map(f=>"<th>"+escapeHtml(f.label)+"</th>").join("");
+  });
+}
 // 通用的「點格子編輯單一價格欄位」函式：collectionName 是 Firestore collection 名稱，
 // cache 是對應的品項快取陣列（itemsCache 或 kybItemsCache），field/label 來自 PRICE_TEMPLATES。
 function editPriceField(collectionName, cache, itemId, field, label){
@@ -194,6 +202,8 @@ function kybLocSummary(item){
 function kybHasPendingStock(item){
   return kybLocQty((item.locations||{})[PENDING_STOCK_CODE]) > 0;
 }
+
+applyPriceTemplateHeaders();
 
 document.getElementById("loginBtn").addEventListener("click", doLogin);
 document.getElementById("loginPassword").addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
@@ -405,83 +415,6 @@ async function refreshKybViews(){
   kybTxnCache = txnsSnap.docs.map(d=>({id:d.id, ...d.data()}));
   renderKybQuery(); renderKybMaster(); renderKybTxns();
 }
-function startTireListeners(){
-  startRealtimeListener(()=>db.collection("items"), snap=>{
-    itemsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderQuery(); renderMaster();
-  }, "tire items");
-  startRealtimeListener(()=>db.collection("locations"), snap=>{
-    locationsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderLocations();
-  }, "tire locations");
-  startRealtimeListener(()=>db.collection("transactions").orderBy("date","desc").limit(200), snap=>{
-    txnCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderTxns();
-  }, "tire transactions");
-  if(userHasAnyRole("warehouse")){
-    db.collection("orders").where("status","==","pending").onSnapshot(snap=>{
-      ordersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-      renderOrders();
-      updateOrdersBadge();
-    });
-  } else {
-    let myOrdersByUid = [], myOrdersByName = [];
-    const refreshMyOrders = ()=>{
-      const merged = new Map([...myOrdersByName, ...myOrdersByUid].map(o=>[o.id, o]));
-      myOrdersCache = [...merged.values()];
-      renderMyOrders();
-    };
-    db.collection("orders").where("requestedByUid","==",currentUser.uid).onSnapshot(snap=>{
-      myOrdersByUid = snap.docs.map(d=>({id:d.id, ...d.data()}));
-      refreshMyOrders();
-    });
-    db.collection("orders").where("requestedByName","==",currentUser.name).onSnapshot(snap=>{
-      myOrdersByName = snap.docs.map(d=>({id:d.id, ...d.data()}));
-      refreshMyOrders();
-    });
-  }
-  db.collection("brands").onSnapshot(snap=>{
-    brandsCache = snap.docs.map(d=>d.data().name);
-    if(brandsCache.length === 0) brandsCache = DEFAULT_BRANDS.slice();
-  }, ()=>{ brandsCache = DEFAULT_BRANDS.slice(); });
-}
-
-function startKybListeners(){
-  startRealtimeListener(()=>db.collection("kybItems"), snap=>{
-    kybItemsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderKybQuery(); renderKybMaster();
-  }, "kyb items");
-  startRealtimeListener(()=>db.collection("kybLocations"), snap=>{
-    kybLocationsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderKybLocations();
-  }, "kyb locations");
-  startRealtimeListener(()=>db.collection("kybTransactions").orderBy("date","desc").limit(200), snap=>{
-    kybTxnCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-    renderKybTxns();
-  }, "kyb transactions");
-  if(userHasAnyRole("warehouse")){
-    db.collection("kybOrders").where("status","==","pending").onSnapshot(snap=>{
-      kybOrdersCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
-      renderKybOrders();
-      updateKybOrdersBadge();
-    });
-  } else {
-    let myKybOrdersByUid = [], myKybOrdersByName = [];
-    const refreshMyKybOrders = ()=>{
-      const merged = new Map([...myKybOrdersByName, ...myKybOrdersByUid].map(o=>[o.id, o]));
-      kybMyOrdersCache = [...merged.values()];
-      renderKybMyOrders();
-    };
-    db.collection("kybOrders").where("requestedByUid","==",currentUser.uid).onSnapshot(snap=>{
-      myKybOrdersByUid = snap.docs.map(d=>({id:d.id, ...d.data()}));
-      refreshMyKybOrders();
-    });
-    db.collection("kybOrders").where("requestedByName","==",currentUser.name).onSnapshot(snap=>{
-      myKybOrdersByName = snap.docs.map(d=>({id:d.id, ...d.data()}));
-      refreshMyKybOrders();
-    });
-  }
-}
 
 function updateOrdersBadge(){
   const badge = document.getElementById("ordersTabBadge");
@@ -578,7 +511,7 @@ function renderAvailabilityViews(){
   if(typeof renderKybMyOrders==="function") renderKybMyOrders();
 }
 function startStockReservationListener(){
-  startInventoryCustomerLookup();
+  startPartiesListener();
   if(reservationsListenerStarted) return;
   reservationsListenerStarted = true;
   startRealtimeListener(()=>db.collection("stockReservations").where("status","==","active"), snap=>{
@@ -664,13 +597,23 @@ function reservationBalanceQty(snap){ return snap&&snap.exists?Math.max(0,Number
 function writeReservationBalance(tx,ref,source,itemId,loc,batchDate,qty){
   tx.set(ref,{source,itemId,loc,batchDate:batchDate||null,reservationKey:makeReservationKey(source,itemId,loc,batchDate),reservedQty:Math.max(0,Number(qty)||0),updatedAt:new Date().toISOString()},{merge:true});
 }
-let inventoryCustomerLookupStarted=false;
-function startInventoryCustomerLookup(){
-  if(inventoryCustomerLookupStarted)return;
-  inventoryCustomerLookupStarted=true;
-  db.collection("erpParties").where("type","==","customer").onSnapshot(snap=>{
-    erpPartiesCache=snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.active!==false).sort((a,b)=>(a.name||"").localeCompare(b.name||"","zh-Hant"));
-  },err=>console.warn("客戶快速搜尋資料尚未取得：",err.message));
+
+// 往來對象（客戶＋廠商）主檔：庫存端的客戶快速搜尋與 ERP 端共用「同一個」監聽器。
+// 之前兩邊各自監聽 erpParties 又各自覆寫 erpPartiesCache，誰後到誰蓋掉，
+// 會造成廠商清單偶爾整個消失。現在統一由這裡啟動，用旗標確保只會有一個監聽器。
+let erpPartiesListenerStarted = false;
+function startPartiesListener(){
+  if(erpPartiesListenerStarted) return;
+  erpPartiesListenerStarted = true;
+  db.collection("erpParties").onSnapshot(snap=>{
+    erpPartiesCache = snap.docs.map(d=>({id:d.id,...d.data()}))
+      .sort((a,b)=>(a.name||"").localeCompare(b.name||"","zh-Hant"));
+    if(typeof renderErpViews === "function") renderErpViews();
+  },err=>console.warn("往來對象資料尚未取得：",err.message));
+}
+function inventoryCustomerOptions(){
+  const list = (typeof erpPartiesCache === "undefined") ? [] : erpPartiesCache;
+  return list.filter(p=>(p.type||"customer")==="customer" && p.active!==false);
 }
 function bindOrderCustomerLookup(inputId,contactId,listId){
   const input=document.getElementById(inputId),contact=document.getElementById(contactId),list=document.getElementById(listId);if(!input||!contact||!list)return;
@@ -681,9 +624,9 @@ function bindOrderCustomerLookup(inputId,contactId,listId){
   };
   input.addEventListener("input",()=>{
     clear();const q=norm(input.value);if(!q){list.classList.add("hidden");return;}
-    const rows=(typeof erpPartiesCache==="undefined"?[]:erpPartiesCache).filter(p=>[p.partyCode,p.name,p.contact,p.phone].map(norm).join(" ").includes(q)).slice(0,8);
+    const rows=inventoryCustomerOptions().filter(p=>[p.partyCode,p.name,p.contact,p.phone].map(norm).join(" ").includes(q)).slice(0,8);
     list.innerHTML=rows.map(p=>`<div data-id="${escapeHtml(p.id)}"><strong>${escapeHtml(p.partyCode||"未編號")}</strong>　${escapeHtml(p.name||"")}<br><small>${escapeHtml(p.contact||"")}　${escapeHtml(p.phone||"")}</small></div>`).join("");
     list.classList.toggle("hidden",rows.length===0);
-    list.querySelectorAll("div").forEach(el=>el.addEventListener("click",()=>{const party=(typeof erpPartiesCache==="undefined"?[]:erpPartiesCache).find(p=>p.id===el.dataset.id);if(party)apply(party);}));
+    list.querySelectorAll("div").forEach(el=>el.addEventListener("click",()=>{const party=inventoryCustomerOptions().find(p=>p.id===el.dataset.id);if(party)apply(party);}));
   });
 }
