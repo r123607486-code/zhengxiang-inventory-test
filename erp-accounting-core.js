@@ -141,3 +141,31 @@ function erpAccountingCreateReceivableLedger(tx, invoiceRef, invoice, customer){
   });
   return ledgerRef;
 }
+
+
+// 由已確認進貨單建立通用應付帳；不影響任何實體庫存。
+function erpAccountingCreatePayableLedger(tx, purchaseRef, purchase, vendor){
+  const ledgerRef=db.collection(ERP_ACCOUNTING.ledger).doc();
+  const original=Math.max(0,erpAccountingNumber(purchase.totalAmount));
+  tx.set(ledgerRef,{
+    ledgerNo:"AP-"+purchase.purchaseNo,
+    direction:"payable",
+    sourceType:"purchase",
+    sourceId:purchaseRef.id,
+    sourceDocumentNo:purchase.purchaseNo,
+    partyId:purchase.vendorId||null,
+    partyName:purchase.vendorName||"",
+    documentDate:purchase.purchaseDate||todayStr(),
+    dueDate:"",
+    paymentTerms:vendor&&vendor.paymentTerms?vendor.paymentTerms:"",
+    originalAmount:original,
+    settledAmount:0,
+    balanceAmount:original,
+    status:erpAccountingStatus(original,0,false),
+    notes:"由進貨單自動建立；此單不直接影響實體庫存。",
+    createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+    createdByUid:currentUser.uid,
+    createdByName:currentUser.name
+  });
+  return ledgerRef;
+}

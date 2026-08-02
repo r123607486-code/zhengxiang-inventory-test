@@ -28,14 +28,14 @@ function erpValidateInstrument(data){
   }
   return "";
 }
-function erpWriteInstrument(tx,ref,data,party,settlementId){
+function erpWriteInstrument(tx,ref,data,party,settlementId,direction){
   tx.set(ref,{
     instrumentType:data.method,
     bank:data.bank,
     instrumentNo:data.instrumentNo,
     dueDate:data.dueDate,
     amount:data.amount,
-    direction:"in",
+    direction:direction||"in",
     partyId:party.partyId||null,
     partyName:party.partyName||"",
     settlementId:settlementId,

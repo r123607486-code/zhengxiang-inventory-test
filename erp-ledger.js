@@ -38,14 +38,14 @@ function renderErpAccounting(){
     + '<section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">OPEN LEDGER</p><h2>未結帳務</h2></div><span class="erp-counter">'+open.length+' 筆</span></div>'
     + (open.length?'<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>類別</th><th>帳務單號</th><th>往來對象</th><th>單據日期</th><th>原始金額</th><th>已沖帳</th><th>餘額</th><th>狀態</th><th>操作</th></tr></thead><tbody>'
       + open.map(row=>'<tr><td>'+erpAccountingDirectionLabel(row.direction)+'</td><td><strong>'+erpEscape(row.ledgerNo||"-")+'</strong></td><td>'+erpEscape(row.partyName||"-")+'</td><td>'+erpEscape(row.documentDate||"-")+'</td><td>NT$ '+erpMoney(row.originalAmount)+'</td><td>NT$ '+erpMoney(row.settledAmount)+'</td><td><strong>NT$ '+erpMoney(row.balanceAmount)+'</strong></td><td>'+erpEscape(erpAccountingStatusLabel(row.status))+'</td><td>'
-        + (row.legacy?'<button class="erp-secondary" data-erp-migrate-ledger="'+erpEscape(row.legacyReceivableId)+'">轉入新帳務</button>':'<button class="erp-primary" data-erp-settle-ledger="'+erpEscape(row.id)+'">登錄收款</button>')
+        + (row.legacy?'<button class="erp-secondary" data-erp-migrate-ledger="'+erpEscape(row.legacyReceivableId)+'">轉入新帳務</button>':(row.direction==="payable"?'<button class="erp-primary" data-erp-pay-ledger="'+erpEscape(row.id)+'">登錄付款</button>':'<button class="erp-primary" data-erp-settle-ledger="'+erpEscape(row.id)+'">登錄收款</button>'))
         + '</td></tr>').join("")
       + '</tbody></table></div>':'<div class="erp-empty">目前沒有未結帳務。下一批「月結開票」建立的應收會直接進入此處。</div>')
     + '</section>'
     + '<section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">SETTLEMENT HISTORY</p><h2>收款沖帳歷程</h2></div><span class="erp-counter">'+settlements.length+' 筆</span></div>'
     + (settlements.length?'<div class="erp-table-wrap"><table class="erp-table"><thead><tr><th>日期</th><th>沖帳單號</th><th>往來對象</th><th>方式</th><th>參考資料</th><th>金額</th><th>狀態</th><th>操作</th></tr></thead><tbody>'
-      + settlements.map(row=>'<tr><td>'+erpEscape(row.settlementDate||"-")+'</td><td><strong>'+erpEscape(row.settlementNo||"-")+'</strong></td><td>'+erpEscape(row.partyName||"-")+'</td><td>'+erpEscape(row.method||"-")+'</td><td>'+erpEscape(row.referenceNo||"-")+'</td><td>NT$ '+erpMoney(row.amount)+'</td><td>'+erpEscape(row.status==="void"?"已作廢":row.legacy?"舊版保留":"有效")+'</td><td>'
-        + (!row.legacy&&row.status!=="void"&&row.settlementType==="receipt"?'<button class="erp-edit-btn" data-erp-edit-settlement="'+erpEscape(row.id)+'">修改</button><button class="erp-edit-btn" data-erp-void-settlement="'+erpEscape(row.id)+'">作廢</button>':'')
+      + settlements.map(row=>'<tr><td>'+erpEscape(row.settlementDate||"-")+'</td><td><strong>'+erpEscape(row.settlementNo||"-")+'</strong></td><td>'+erpEscape(row.partyName||"-")+'</td><td>'+erpEscape(row.settlementType==="payment"?"付款："+(row.method||"-"):row.settlementType==="return_credit"?"退回／折讓":(row.method||"-"))+'</td><td>'+erpEscape(row.referenceNo||"-")+'</td><td>NT$ '+erpMoney(row.amount)+'</td><td>'+erpEscape(row.status==="void"?"已作廢":row.legacy?"舊版保留":"有效")+'</td><td>'
+        + (!row.legacy&&row.status!=="void"&&(row.settlementType==="receipt"||row.settlementType==="payment")?'<button class="erp-edit-btn" data-erp-edit-settlement="'+erpEscape(row.id)+'">修改</button><button class="erp-edit-btn" data-erp-void-settlement="'+erpEscape(row.id)+'">作廢</button>':'')
         + '</td></tr>').join("")
       + '</tbody></table></div>':'<div class="erp-empty">尚無收款沖帳紀錄。</div>')
     + '</section>';
@@ -60,10 +60,11 @@ function renderErpAccounting(){
     }
   }));
   el.querySelectorAll("[data-erp-settle-ledger]").forEach(button=>button.addEventListener("click",()=>openErpSettlementForm(button.dataset.erpSettleLedger)));
+  el.querySelectorAll("[data-erp-pay-ledger]").forEach(button=>button.addEventListener("click",()=>openErpPaymentForm(button.dataset.erpPayLedger)));
   el.querySelectorAll("[data-erp-edit-settlement]").forEach(button=>button.addEventListener("click",()=>{
     const item=erpSettlementById(button.dataset.erpEditSettlement);
     const ledgerId=erpSettlementLedgerId(item);
-    if(ledgerId) openErpSettlementForm(ledgerId,item.id);
+    if(ledgerId){ const ledger=erpLedgerCache.find(row=>row.id===ledgerId); if(ledger&&ledger.direction==="payable") openErpPaymentForm(ledgerId,item.id); else openErpSettlementForm(ledgerId,item.id); }
   }));
-  el.querySelectorAll("[data-erp-void-settlement]").forEach(button=>button.addEventListener("click",()=>voidErpSettlement(button.dataset.erpVoidSettlement)));
+  el.querySelectorAll("[data-erp-void-settlement]").forEach(button=>button.addEventListener("click",()=>{ const item=erpSettlementById(button.dataset.erpVoidSettlement); if(item&&item.settlementType==="payment") voidErpPayment(item.id); else voidErpSettlement(button.dataset.erpVoidSettlement); }));
 }

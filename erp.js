@@ -23,6 +23,7 @@ let erpInvoiceSeriesCache = [];
 let erpStatementFilter = { partyName:"", from:"", to:"" };
 let erpSalesReturnsCache = [];
 let erpReturnFilter = { invoiceId:"" };
+let erpPurchasesCache = [];
 let erpReceivablesCache = [];
 let erpReceiptsCache = [];
 let erpLedgerCache = [];
@@ -95,22 +96,26 @@ function buildErpWorkspace(){
       <aside class="erp-sidebar">
         <button class="erp-nav active" data-erp-view="dashboard">${ERP_ICONS.dashboard}<span>營運總覽</span></button>
         <button class="erp-nav" data-erp-view="customers">${ERP_ICONS.customers}<span>客戶管理</span></button>
+        <button class="erp-nav" data-erp-view="vendors">${ERP_ICONS.customers}<span>廠商管理</span></button>
         <button class="erp-nav" data-erp-view="sales">${ERP_ICONS.sales}<span>銷貨單</span></button>
         <button class="erp-nav" data-erp-view="transfers">${ERP_ICONS.transfer}<span>待建立銷貨單</span></button>
         <button class="erp-nav" data-erp-view="invoices">${ERP_ICONS.sales}<span>發票管理</span></button>
         <button class="erp-nav" data-erp-view="statements">${ERP_ICONS.sales}<span>客戶對帳單</span></button>
         <button class="erp-nav" data-erp-view="returns">${ERP_ICONS.transfer}<span>退回與折讓</span></button>
+        <button class="erp-nav" data-erp-view="purchases">${ERP_ICONS.transfer}<span>進貨單與應付</span></button>
         <button class="erp-nav" data-erp-view="accounting">${ERP_ICONS.customers}<span>帳務與收款</span></button>
         <div class="erp-sidebar-note">帳務基礎<br>通用帳・沖帳・票據</div>
       </aside>
       <main class="erp-main">
         <section class="erp-page" id="erp-page-dashboard"></section>
         <section class="erp-page hidden" id="erp-page-customers"></section>
+        <section class="erp-page hidden" id="erp-page-vendors"></section>
         <section class="erp-page hidden" id="erp-page-sales"></section>
         <section class="erp-page hidden" id="erp-page-transfers"></section>
         <section class="erp-page hidden" id="erp-page-invoices"></section>
         <section class="erp-page hidden" id="erp-page-statements"></section>
         <section class="erp-page hidden" id="erp-page-returns"></section>
+        <section class="erp-page hidden" id="erp-page-purchases"></section>
         <section class="erp-page hidden" id="erp-page-accounting"></section>
       </main>
     </div>`;
@@ -157,6 +162,9 @@ function startErpListeners(){
   db.collection("erpSalesReturns").onSnapshot(snap => {
     erpSalesReturnsCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
   },err=>console.error("ERP 銷貨退回讀取失敗",err));
+  db.collection("erpPurchases").onSnapshot(snap => {
+    erpPurchasesCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
+  },err=>console.error("ERP 進貨單讀取失敗",err));
   db.collection("erpReceivables").onSnapshot(snap => {
     erpReceivablesCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
   },err=>console.error("ERP 應收帳款讀取失敗",err));
@@ -201,11 +209,13 @@ function renderErpViews(){
   if(!document.getElementById("erpApp") || document.getElementById("erpApp").classList.contains("hidden")) return;
   renderErpDashboard();
   renderErpParties();
+  renderErpVendors();
   renderErpSales();
   renderErpTransfers();
   renderErpInvoices();
   renderErpStatements();
   renderErpReturns();
+  renderErpPurchases();
   renderErpAccounting();
 }
 
