@@ -21,6 +21,9 @@ let erpInvoicesCache = [];
 let erpInvoiceFilter = { customerName:"", from:"", to:"" };
 let erpReceivablesCache = [];
 let erpReceiptsCache = [];
+let erpLedgerCache = [];
+let erpSettlementsCache = [];
+let erpInstrumentsCache = [];
 
 const ERP_ICONS = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 18h7M17.5 14.5v7"/></svg>',
@@ -91,8 +94,8 @@ function buildErpWorkspace(){
         <button class="erp-nav" data-erp-view="sales">${ERP_ICONS.sales}<span>銷貨單</span></button>
         <button class="erp-nav" data-erp-view="transfers">${ERP_ICONS.transfer}<span>待建立銷貨單</span></button>
         <button class="erp-nav" data-erp-view="invoices">${ERP_ICONS.sales}<span>月結開票</span></button>
-        <button class="erp-nav" data-erp-view="receivables">${ERP_ICONS.customers}<span>應收與收款</span></button>
-        <div class="erp-sidebar-note">第三階段<br>銷貨・月結・應收帳款</div>
+        <button class="erp-nav" data-erp-view="accounting">${ERP_ICONS.customers}<span>帳務與收款</span></button>
+        <div class="erp-sidebar-note">帳務基礎<br>通用帳・沖帳・票據</div>
       </aside>
       <main class="erp-main">
         <section class="erp-page" id="erp-page-dashboard"></section>
@@ -100,7 +103,7 @@ function buildErpWorkspace(){
         <section class="erp-page hidden" id="erp-page-sales"></section>
         <section class="erp-page hidden" id="erp-page-transfers"></section>
         <section class="erp-page hidden" id="erp-page-invoices"></section>
-        <section class="erp-page hidden" id="erp-page-receivables"></section>
+        <section class="erp-page hidden" id="erp-page-accounting"></section>
       </main>
     </div>`;
   document.getElementById("erpWhoLabel").textContent = currentUser.name + "｜" + userRolesLabel(currentUser.roles);
@@ -146,6 +149,15 @@ function startErpListeners(){
   db.collection("erpReceipts").onSnapshot(snap => {
     erpReceiptsCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
   },err=>console.error("ERP 收款讀取失敗",err));
+  db.collection("erpLedger").onSnapshot(snap => {
+    erpLedgerCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
+  },err=>console.error("ERP 通用帳務讀取失敗",err));
+  db.collection("erpSettlements").onSnapshot(snap => {
+    erpSettlementsCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
+  },err=>console.error("ERP 沖帳資料讀取失敗",err));
+  db.collection("erpInstruments").onSnapshot(snap => {
+    erpInstrumentsCache=snap.docs.map(d=>({id:d.id,...d.data()})); renderErpViews();
+  },err=>console.error("ERP 票據資料讀取失敗",err));
   db.collection("transactions").onSnapshot(snap => {
     erpTireTransactionsCache = snap.docs.map(d => ({id:d.id, ...d.data()}));
     renderErpViews();
@@ -178,7 +190,7 @@ function renderErpViews(){
   renderErpSales();
   renderErpTransfers();
   renderErpInvoices();
-  renderErpReceivables();
+  renderErpAccounting();
 }
 
 function renderErpDashboard(){
