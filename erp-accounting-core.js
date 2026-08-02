@@ -113,3 +113,31 @@ async function erpAccountingMigrateLegacyReceivable(legacyId){
   erpAccountingAudit("legacy_receivable_migrated",ledgerRef.id,{legacyReceivableId:legacyId});
   return ledgerRef.id;
 }
+
+
+// 由月結發票建立通用應收帳；此函式只負責寫入交易，單號與發票由開票模組處理。
+function erpAccountingCreateReceivableLedger(tx, invoiceRef, invoice, customer){
+  const ledgerRef=db.collection(ERP_ACCOUNTING.ledger).doc();
+  const original=Math.max(0,erpAccountingNumber(invoice.totalAmount));
+  tx.set(ledgerRef,{
+    ledgerNo:"AR-"+invoice.invoiceNo,
+    direction:"receivable",
+    sourceType:"invoice",
+    sourceId:invoiceRef.id,
+    sourceDocumentNo:invoice.invoiceNo,
+    partyId:invoice.customerId||null,
+    partyName:invoice.customerName||"",
+    documentDate:invoice.invoiceDate||todayStr(),
+    dueDate:"",
+    paymentTerms:customer&&customer.paymentTerms?customer.paymentTerms:"",
+    originalAmount:original,
+    settledAmount:0,
+    balanceAmount:original,
+    status:erpAccountingStatus(original,0,false),
+    notes:"由月結發票自動建立。",
+    createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+    createdByUid:currentUser.uid,
+    createdByName:currentUser.name
+  });
+  return ledgerRef;
+}
