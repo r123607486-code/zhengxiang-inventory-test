@@ -335,10 +335,12 @@ function openOrderModal(itemId){
     <div class="form-row"><label>客戶姓名（可輸入關鍵字搜尋並點選帶入）</label><input type="text" id="orderCustomerName" autocomplete="off"><div class="autocomplete-list hidden" id="orderCustomerList"></div></div>
     <div class="form-row"><label>聯絡方式</label><input type="text" id="orderCustomerContact"></div>
     <div class="form-row"><label>備註</label><input type="text" id="orderCustomerNote"></div>
+    <section class="sales-pricing-box" id="tireOrderPriceBox" data-sales-source="tire"><div class="sales-pricing-title">銷售金額與稅別</div><div class="form-row"><label>套用價目表</label><select id="tireOrderPricePriceList"><option value="">請先選擇品項</option></select></div><div class="form-row"><label>單價</label><input type="number" min="0" step="1" inputmode="numeric" id="tireOrderPriceUnitPrice" placeholder="請輸入實際成交單價"></div><div class="form-row"><label>稅別</label><select id="tireOrderPriceTaxMode"><option value="no_tax">不計稅</option><option value="tax_included">稅內含（5%）</option><option value="tax_excluded">稅外加（5%）</option></select></div><div class="sales-pricing-summary" id="tireOrderPriceSummary"></div></section>
     <div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="orderSubmitBtn">送出並預留</button></div>`;
   openModal(html);
   bindOrderCustomerLookup("orderCustomerName","orderCustomerContact","orderCustomerList");
-  const refresh=()=>{const opt=options[Number(document.getElementById("orderLoc").value)], el=document.getElementById("orderQty"); el.innerHTML=opt?Array.from({length:opt.available},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join(""):`<option value="0">目前無可用庫存</option>`;};
+  const orderPricing=bindSalesPricing("tireOrderPrice","tire",()=>item,()=>Number(document.getElementById("orderQty").value)||0,null,"orderQty");
+  const refresh=()=>{const opt=options[Number(document.getElementById("orderLoc").value)], el=document.getElementById("orderQty"); el.innerHTML=opt?Array.from({length:opt.available},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join(""):`<option value="0">目前無可用庫存</option>`;orderPricing.refresh();};
   if(options.length) document.getElementById("orderLoc").addEventListener("change",refresh); refresh();
   document.getElementById("orderSubmitBtn").addEventListener("click",async()=>{
     const opt=options[Number(document.getElementById("orderLoc").value)], qty=Number(document.getElementById("orderQty").value);
@@ -346,7 +348,8 @@ function openOrderModal(itemId){
     const customerName=customerInput.value.trim(),customerContact=document.getElementById("orderCustomerContact").value.trim(),customerNote=document.getElementById("orderCustomerNote").value.trim();
     const customerId=customerInput.dataset.partyId||null,customerCode=customerInput.dataset.partyCode||"",customerContactPerson=customerInput.dataset.partyContact||"";
     if(!opt||!qty||qty<=0){alert("請選擇有可用量的儲位與數量");return;} if(!customerName){alert("請輸入客戶姓名");return;}
-    try{await createReservedTireOrder({itemId:item.id,itemLabel:`${item.brand} ${item.spec}（${item.model||""}）`,qty,loc:opt.code,batchDate:opt.date||null,customerId,customerCode,customerContactPerson,customerName,customerContact,customerNote,requestedByUid:currentUser.uid,requestedByName:currentUser.name});closeModal();alert("已送出，庫存已預留，等待倉管確認出貨。");}
+    let pricing;try{pricing=readSalesPricing("tireOrderPrice",qty);}catch(e){alert(e.message);return;}
+    try{await createReservedTireOrder({itemId:item.id,itemLabel:`${item.brand} ${item.spec}（${item.model||""}）`,qty,loc:opt.code,batchDate:opt.date||null,customerId,customerCode,customerContactPerson,customerName,customerContact,customerNote,...pricing,requestedByUid:currentUser.uid,requestedByName:currentUser.name});closeModal();alert("已送出，庫存已預留，等待倉管確認出貨。");}
     catch(e){alert("送出失敗："+e.message);}
   });
 }

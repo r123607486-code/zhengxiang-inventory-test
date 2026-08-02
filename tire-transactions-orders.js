@@ -70,12 +70,19 @@ function openTxnModal(){
     </div>
     <div class="form-row" id="txnProdDateRow"><label>生產日期（選填，這批的4碼DOT代碼，例如2523；只有進貨才需要）</label><input type="text" id="txnProdDate" placeholder="例如 2523"></div>
     <div class="form-row" id="txnCostRow"><label>進價（選填，每單位成本，只有進貨才需要；用於未來計算毛利，目前不會顯示在任何報表）</label><input type="number" id="txnCost" min="0" step="0.01" placeholder="例如 1200"></div>
+    <div id="txnSaleRows" class="hidden">
+      <div class="form-row"><label>客戶姓名（銷貨必填，可輸入關鍵字搜尋並點選帶入）</label><input type="text" id="txnCustomerName" autocomplete="off"><div class="autocomplete-list hidden" id="txnCustomerList"></div></div>
+      <div class="form-row"><label>聯絡方式</label><input type="text" id="txnCustomerContact"></div>
+      <section class="sales-pricing-box" id="tireTxnPriceBox" data-sales-source="tire"><div class="sales-pricing-title">銷售金額與稅別</div><div class="form-row"><label>套用價目表</label><select id="tireTxnPricePriceList"><option value="">請先選擇品項</option></select></div><div class="form-row"><label>單價</label><input type="number" min="0" step="1" inputmode="numeric" id="tireTxnPriceUnitPrice" placeholder="請輸入實際成交單價"></div><div class="form-row"><label>稅別</label><select id="tireTxnPriceTaxMode"><option value="no_tax">不計稅</option><option value="tax_included">稅內含（5%）</option><option value="tax_excluded">稅外加（5%）</option></select></div><div class="sales-pricing-summary" id="tireTxnPriceSummary"></div></section>
+    </div>
     <div class="form-actions">
       <button onclick="closeModal()">取消</button>
       <button class="primary" id="txnSubmitBtn">確認送出</button>
     </div>`;
   openModal(html);
   let selectedItemId = null;
+  bindOrderCustomerLookup("txnCustomerName","txnCustomerContact","txnCustomerList");
+  const txnPricing=bindSalesPricing("tireTxnPrice","tire",()=>itemsCache.find(i=>i.id===selectedItemId),()=>Number(document.getElementById("txnQty").value)||0,null,"txnQty");
 
   function refreshLocOptions(){
     const type = document.getElementById("txnType").value;
@@ -92,8 +99,11 @@ function openTxnModal(){
       prodDateRow.classList.remove("hidden");
       costRow.classList.remove("hidden");
     }
-    if(!it){ locSelect.innerHTML = `<option value="">請先選擇品項</option>`; window._txnOutOptions = []; return; }
-    if(type === "out"){
+    const saleRows=document.getElementById("txnSaleRows");
+    if(type === "out") saleRows.classList.remove("hidden"); else saleRows.classList.add("hidden");
+    if(!it){ locSelect.innerHTML = `<option value="">請先選擇品項</option>`; window._txnOutOptions = []; txnPricing.setItem(null); return; }
+    if(type === "out"){ txnPricing.setItem(it);
+
       const options = locDetailList(it);
       window._txnOutOptions = options;
       if(options.length === 0){
@@ -146,8 +156,15 @@ function openTxnModal(){
     }
     const costInput = document.getElementById("txnCost").value;
     const unitCost = (type === "in" && costInput !== "") ? Number(costInput) : null;
+    let saleData={};
+    if(type === "out"){
+      const customerInput=document.getElementById("txnCustomerName");
+      const customerName=customerInput.value.trim();
+      if(!customerName){alert("銷貨請輸入客戶姓名");return;}
+      try{saleData={customerId:customerInput.dataset.partyId||null,customerCode:customerInput.dataset.partyCode||"",customerContactPerson:customerInput.dataset.partyContact||"",customerName,customerContact:document.getElementById("txnCustomerContact").value.trim(),salesperson:currentUser.name,...readSalesPricing("tireTxnPrice",qty)};}catch(e){alert(e.message);return;}
+    }
     try{
-      await submitTxn(selectedItemId, type, qty, loc, batchDate, unitCost);
+      await submitTxn(selectedItemId, type, qty, loc, batchDate, unitCost, saleData);
     }catch(e){
       console.error("輪胎進銷貨送出失敗：", e);
       alert("送出失敗：" + (e.message || "資料庫拒絕寫入。請聯絡管理者確認 Firebase 權限。"));
@@ -219,11 +236,13 @@ function openEditTxnModal(txnId){
     <div class="form-row"><label>生產日期（這批的4碼DOT代碼，留空表示不指定批次）</label><input type="text" id="editTxnBatchDate" value="${escapeHtml(t.batchDate||"")}" placeholder="例如 2523"></div>
     <div class="form-row"><label>業務</label><input type="text" id="editTxnSalesperson" value="${escapeHtml(t.salesperson||"")}"></div>
     <div class="form-row"><label>客戶姓名</label><input type="text" id="editTxnCustomerName" value="${escapeHtml(t.customerName||"")}"></div>
+    <div id="tireEditTxnPriceWrap" class="${t.type==='out'?'':'hidden'}">${salesPricingHtml("tireEditTxnPrice","tire")}</div>
     <div class="form-actions">
       <button onclick="closeModal()">取消</button>
       <button class="primary" id="editTxnSaveBtn">儲存</button>
     </div>`;
   openModal(html);
+  const editPricing=t.type==="out"?bindSalesPricing("tireEditTxnPrice","tire",()=>item,()=>Number(document.getElementById("editTxnQty").value)||0,t,"editTxnQty"):null;
 
   document.getElementById("editTxnSaveBtn").addEventListener("click", async ()=>{
     const newDate = document.getElementById("editTxnDate").value || todayStr();
@@ -234,8 +253,10 @@ function openEditTxnModal(txnId){
     const newCustomerName = document.getElementById("editTxnCustomerName").value.trim();
     if(!newQty || newQty<=0){ alert("請輸入正確的數量"); return; }
     if(!newLoc){ alert("請選擇儲位"); return; }
+    let saleData={};
+    if(t.type==="out"){try{saleData=readSalesPricing("tireEditTxnPrice",newQty);}catch(e){alert(e.message);return;}}
     try{
-      await saveEditTxn(t, { date:newDate, qty:newQty, loc:newLoc, batchDate:newBatchDate, salesperson:newSalesperson, customerName:newCustomerName });
+      await saveEditTxn(t, { date:newDate, qty:newQty, loc:newLoc, batchDate:newBatchDate, salesperson:newSalesperson, customerName:newCustomerName, ...saleData });
       closeModal();
     }catch(e){
       alert("儲存失敗："+e.message);
@@ -285,9 +306,10 @@ async function saveEditTxn(t, next){
   await db.collection("transactions").doc(t.id).update({
     date: next.date, qty: next.qty, loc: next.loc, batchDate: next.batchDate,
     salesperson: next.salesperson, customerName: next.customerName,
+    ...(t.type==="out"?salesPricingStoredFields(next,next.qty):{}),
     editLog: firebase.firestore.FieldValue.arrayUnion({
-      before: { date:t.date||null, qty:t.qty, loc:t.loc, batchDate:t.batchDate||null, salesperson:t.salesperson||"", customerName:t.customerName||"" },
-      after: { date:next.date, qty:next.qty, loc:next.loc, batchDate:next.batchDate, salesperson:next.salesperson, customerName:next.customerName },
+      before: { date:t.date||null, qty:t.qty, loc:t.loc, batchDate:t.batchDate||null, salesperson:t.salesperson||"", customerName:t.customerName||"", unitPrice:Number(t.unitPrice)||0, taxMode:t.taxMode||"no_tax" },
+      after: { date:next.date, qty:next.qty, loc:next.loc, batchDate:next.batchDate, salesperson:next.salesperson, customerName:next.customerName, unitPrice:Number(next.unitPrice)||0, taxMode:next.taxMode||"no_tax" },
       time: new Date().toISOString(), by: currentUser.name
     })
   });
@@ -680,8 +702,10 @@ function openEditOrderModal(orderId){
     <div class="form-row"><label>客戶姓名</label><input type="text" id="editOrderCustomerName" value="${escapeHtml(order.customerName||'')}"></div>
     <div class="form-row"><label>聯絡方式</label><input type="text" id="editOrderCustomerContact" value="${escapeHtml(order.customerContact||'')}"></div>
     <div class="form-row"><label>備註</label><input type="text" id="editOrderCustomerNote" value="${escapeHtml(order.customerNote||'')}"></div>
+    <section class="sales-pricing-box" id="tireEditOrderPriceBox" data-sales-source="tire"><div class="sales-pricing-title">銷售金額與稅別</div><div class="form-row"><label>套用價目表</label><select id="tireEditOrderPricePriceList"><option value="">請先選擇品項</option></select></div><div class="form-row"><label>單價</label><input type="number" min="0" step="1" inputmode="numeric" id="tireEditOrderPriceUnitPrice" placeholder="請輸入實際成交單價"></div><div class="form-row"><label>稅別</label><select id="tireEditOrderPriceTaxMode"><option value="no_tax">不計稅</option><option value="tax_included">稅內含（5%）</option><option value="tax_excluded">稅外加（5%）</option></select></div><div class="sales-pricing-summary" id="tireEditOrderPriceSummary"></div></section>
     <div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="editOrderSaveBtn">儲存並重新預留</button></div>`;
   openModal(html);
+  const editPricing=bindSalesPricing("tireEditOrderPrice","tire",()=>itemsCache.find(i=>i.id===selectedItemId),()=>Number(document.getElementById("editOrderQty").value)||0,order,"editOrderQty");
   const renderLocs=()=>{
     const item=itemsCache.find(i=>i.id===selectedItemId);
     locOptions=item?locDetailList(item).map(o=>({...o,available:tireAvailableAt(item,o.code,o.date,order.reservationId)})).filter(o=>o.available>0):[];
@@ -696,13 +720,14 @@ function openEditOrderModal(orderId){
     const q=norm(search.value),list=document.getElementById("editOrderItemList");if(!q){list.classList.add("hidden");return;}
     const matches=itemsCache.filter(it=>norm(it.spec).includes(q)||norm(it.model).includes(q)||norm(it.brand).includes(q)).slice(0,15);
     list.innerHTML=matches.map(it=>`<div data-id="${it.id}">${escapeHtml(it.brand)}　${escapeHtml(it.spec)}（${escapeHtml(it.model||"")}）</div>`).join("");list.classList.toggle("hidden",matches.length===0);
-    list.querySelectorAll("div").forEach(d=>d.addEventListener("click",()=>{selectedItemId=d.dataset.id;const it=itemsCache.find(x=>x.id===selectedItemId);document.getElementById("editOrderItemLabel").value=`${it.brand} ${it.spec}（${it.model||""}）`;list.classList.add("hidden");search.value="";renderLocs();}));
+    list.querySelectorAll("div").forEach(d=>d.addEventListener("click",()=>{selectedItemId=d.dataset.id;const it=itemsCache.find(x=>x.id===selectedItemId);document.getElementById("editOrderItemLabel").value=`${it.brand} ${it.spec}（${it.model||""}）`;list.classList.add("hidden");search.value="";renderLocs();editPricing.setItem(it);}));
   });
   document.getElementById("editOrderSaveBtn").addEventListener("click",async()=>{
     const qty=Number(document.getElementById("editOrderQty").value),opt=locOptions[Number(document.getElementById("editOrderLoc").value)],item=itemsCache.find(i=>i.id===selectedItemId);
     const customerName=document.getElementById("editOrderCustomerName").value.trim(),customerContact=document.getElementById("editOrderCustomerContact").value.trim(),customerNote=document.getElementById("editOrderCustomerNote").value.trim();
     if(!item||!opt||!qty||qty<=0){alert("請選擇有可用量的品項、儲位與數量");return;}if(!customerName){alert("請輸入客戶姓名");return;}
-    try{await saveTireOrderEdit(order,{itemId:item.id,itemLabel:`${item.brand} ${item.spec}（${item.model||""}）`,qty,loc:opt.code,batchDate:opt.date||null,customerName,customerContact,customerNote});closeModal();}catch(e){alert("儲存失敗："+e.message);}
+    let pricing;try{pricing=readSalesPricing("tireEditOrderPrice",qty);}catch(e){alert(e.message);return;}
+    try{await saveTireOrderEdit(order,{itemId:item.id,itemLabel:`${item.brand} ${item.spec}（${item.model||""}）`,qty,loc:opt.code,batchDate:opt.date||null,customerName,customerContact,customerNote,...pricing});closeModal();}catch(e){alert("儲存失敗："+e.message);}
   });
 }
 
@@ -779,7 +804,7 @@ async function confirmTireOrder(order,loc,batchDate){
     if(remain>0)throw new Error("批次庫存不足，請重新整理後再試一次");
     batches=batches.filter(b=>b.qty>0);if(batches.length)allLocs[loc]=batches;else delete allLocs[loc];
     const now=new Date().toISOString(),txnRef=db.collection("transactions").doc();
-    tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId:live.itemId,type:"out",qty:live.qty,loc,batchDate:batchDate||null,date:todayStr(),operator:currentUser.name,salesperson:live.requestedByName||"",customerName:live.customerName||"",customerContact:live.customerContact||"",customerNote:live.customerNote||"",orderId:order.id,reservationId:live.reservationId||null,editLog:[],createdAt:now});
+    tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId:live.itemId,type:"out",qty:live.qty,loc,batchDate:batchDate||null,date:todayStr(),operator:currentUser.name,salesperson:live.requestedByName||"",customerName:live.customerName||"",customerContact:live.customerContact||"",customerNote:live.customerNote||"",...salesPricingStoredFields(live,live.qty),orderId:order.id,reservationId:live.reservationId||null,editLog:[],createdAt:now});
     if(res){writeReservationBalance(tx,oldBalanceRef,"tire",res.itemId,res.loc,res.batchDate||null,reservationBalanceQty(oldBalanceSnap)-Number(res.qty||0));tx.update(resRef,{status:"consumed",consumedAt:now,consumedBy:currentUser.name,fulfilledLoc:loc,fulfilledBatchDate:batchDate||null});}
     tx.update(orderRef,{status:"confirmed",confirmedAt:now,confirmedBy:currentUser.name,linkedTxnId:txnRef.id,reservationStatus:res?"consumed":live.reservationStatus||null});
     return txnRef;
@@ -802,13 +827,13 @@ async function saveTireOrderEdit(order,change){
     tx.update(orderRef,{...change,reservationId:reservationRef.id,reservationStatus:"active",updatedAt:now,updatedBy:currentUser.name});
   });
 }
-async function submitTxn(itemId,type,qty,loc,batchDate,unitCost){
+async function submitTxn(itemId,type,qty,loc,batchDate,unitCost,saleData={}){
   const itemRef=db.collection("items").doc(itemId);
   await db.runTransaction(async tx=>{
     const itemSnap=await tx.get(itemRef);if(!itemSnap.exists)throw new Error("找不到品項");const item={id:itemId,...itemSnap.data()},allLocs={...(item.locations||{})},usedDate=batchDate||null;let batches=normalizeBatches(allLocs[loc],item).map(b=>({...b}));
     const balanceRef=reservationBalanceRef("tire",itemId,loc,usedDate),balanceSnap=type==="out"?await tx.get(balanceRef):null;
     if(type==="in"){const idx=batches.findIndex(b=>(b.productionDate||null)===usedDate);if(idx>=0)batches[idx].qty+=qty;else batches.push({qty,productionDate:usedDate});}
     else{const available=tireStockAt(item,loc,usedDate)-reservationBalanceQty(balanceSnap);if(qty>available)throw new Error(`可用庫存只有 ${Math.max(0,available)}，不能扣除已預留數量`);let remain=qty;batches.forEach(b=>{if(remain>0&&(b.productionDate||null)===usedDate){const take=Math.min(remain,Number(b.qty)||0);b.qty-=take;remain-=take;}});if(remain>0)throw new Error("庫存不足");}
-    batches=batches.filter(b=>b.qty>0);if(batches.length)allLocs[loc]=batches;else delete allLocs[loc];const now=new Date().toISOString(),txnRef=db.collection("transactions").doc();tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId,type,qty,loc,batchDate:usedDate,date:todayStr(),operator:currentUser.name,editLog:[],unitCost:(type==="in"&&unitCost!=null&&Number.isFinite(unitCost))?unitCost:null,createdAt:now});
+    batches=batches.filter(b=>b.qty>0);if(batches.length)allLocs[loc]=batches;else delete allLocs[loc];const now=new Date().toISOString(),txnRef=db.collection("transactions").doc();tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId,type,qty,loc,batchDate:usedDate,date:todayStr(),operator:currentUser.name,editLog:[],unitCost:(type==="in"&&unitCost!=null&&Number.isFinite(unitCost))?unitCost:null,...(type==="out"?{customerId:saleData.customerId||null,customerCode:saleData.customerCode||"",customerContactPerson:saleData.customerContactPerson||"",customerName:saleData.customerName||"",customerContact:saleData.customerContact||"",salesperson:saleData.salesperson||currentUser.name,...salesPricingStoredFields(saleData,qty)}:{}),createdAt:now});
   });await refreshTireViews();closeModal();
 }

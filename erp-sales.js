@@ -32,7 +32,8 @@ function erpSalesSources(){
     key:sourceType + ":" + t.id, sourceType, sourceTransactionId:t.id,
     date:t.date || "", quantity:Number(t.qty)||0, customerName:t.customerName || "",
     customerContact:t.customerContact || "", notes:t.customerNote || "",
-    salesperson:t.salesperson || t.operator || "", itemName:erpSourceItemLabel(sourceType,t)
+    salesperson:t.salesperson || t.operator || "", itemName:erpSourceItemLabel(sourceType,t),
+    ...salesPricingStoredFields({...t,itemSource:sourceType}, Number(t.qty)||0)
   }));
   return [...make("tire",erpTireTransactionsCache),...make("kyb",erpKybTransactionsCache)]
     .sort((a,b) => (b.date || "").localeCompare(a.date || ""));
@@ -69,8 +70,10 @@ async function importErpSourceSale(source){
     await db.collection("erpSalesOrders").add({
       orderNo:erpOrderNumber(), orderDate:source.date || todayStr(),
       customerId:customer ? customer.id : null, customerCode:customer ? (customer.partyCode || "") : "", customerName:source.customerName || "",
-      taxMode:"no_tax", salesperson:source.salesperson, itemSource:source.sourceType,
-      itemName:source.itemName, quantity:source.quantity, unitPrice:0, amount:0,
+      taxMode:source.taxMode || "no_tax", salesperson:source.salesperson, itemSource:source.sourceType,
+      itemName:source.itemName, quantity:source.quantity,
+      ...salesPricingStoredFields({...source,itemSource:source.sourceType}, source.quantity),
+      amount:Number(source.lineAmount)||0,
       notes:source.notes || "", status:"draft", sourceType:source.sourceType,
       sourceTransactionId:source.sourceTransactionId, sourceCustomerContact:source.customerContact || "",
       createdAt:firebase.firestore.FieldValue.serverTimestamp(), createdByUid:currentUser.uid, createdByName:currentUser.name
@@ -97,9 +100,7 @@ function erpCalcLines(lines,mode){
 function erpTotals(source){
   const lineAmount=source.lines?source.lines.reduce((s,l)=>s+(Number(l.quantity)||0)*(Number(l.unitPrice)||0),0):
     (source.lineAmount!=null?Number(source.lineAmount):((Number(source.quantity)||0)*(Number(source.unitPrice)||0)));
-  if(source.taxMode==="tax_excluded"){const subtotal=Math.round(lineAmount),taxAmount=Math.round(subtotal*.05);return{lineAmount:subtotal,subtotal,taxAmount,totalAmount:subtotal+taxAmount,taxRate:.05};}
-  if(source.taxMode==="tax_included"){const totalAmount=Math.round(lineAmount),subtotal=Math.round(totalAmount/1.05);return{lineAmount:totalAmount,subtotal,taxAmount:totalAmount-subtotal,totalAmount,taxRate:.05};}
-  const subtotal=Math.round(lineAmount);return{lineAmount:subtotal,subtotal,taxAmount:0,totalAmount:subtotal,taxRate:0};
+  return salesPricingTotals({lineAmount,taxMode:source.taxMode||"no_tax"});
 }
 function erpDisplayTotals(o){return o&&o.totalAmount!=null?{subtotal:Number(o.subtotalAmount)||0,taxAmount:Number(o.taxAmount)||0,totalAmount:Number(o.totalAmount)||0}:erpTotals(o||{});}
 function erpLineSummary(o){const a=erpOrderLines(o);return erpEscape(a[0].itemName||"-")+(a.length>1?" 等 "+a.length+" 項":"")+" × "+(Number(a[0].quantity)||0);}

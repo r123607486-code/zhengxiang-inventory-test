@@ -130,3 +130,17 @@ table.grid .loc-line.loc-expired{color:#a31e22;font-weight:700;}
 .load-more-btn{width:100%;padding:10px;border:1px solid var(--border);background:#fff;border-radius:8px;font-size:13px;cursor:pointer;color:var(--muted);margin-top:6px;}
 
 
+
+
+/* 銷售計價共用元件：叫貨、庫存銷貨、ERP 採用相同資訊層級 */
+.sales-pricing-box{margin:12px 0;padding:12px;border:1px solid #ddd8ff;border-radius:12px;background:linear-gradient(135deg,#fbfaff 0%,#f5f4ff 100%);}
+.sales-pricing-title{font-size:13px;font-weight:700;color:#4438a8;margin-bottom:10px;}
+.sales-pricing-summary{display:grid;grid-template-columns:repeat(3,1fr);overflow:hidden;border:1px solid #e1ddf8;border-radius:9px;background:#fff;}
+.sales-pricing-summary>div{padding:9px 8px;border-right:1px solid #e9e6fa;display:flex;flex-direction:column;gap:3px;}
+.sales-pricing-summary>div:last-child{border-right:0;}
+.sales-pricing-summary span{font-size:11px;color:#6f6b83;}
+.sales-pricing-summary strong{font-size:13px;color:#27234e;}
+.sales-pricing-summary .sales-pricing-total{background:#eeecff;}
+.sales-pricing-summary .sales-pricing-total strong{color:#4338ca;font-size:14px;}
+.sales-pricing-summary>span{grid-column:1/-1;padding:10px;font-size:12px;color:#777286;}
+@media(max-width:480px){.sales-pricing-summary{grid-template-columns:1fr;}.sales-pricing-summary>div{border-right:0;border-bottom:1px solid #e9e6fa;}.sales-pricing-summary>div:last-child{border-bottom:0;}}

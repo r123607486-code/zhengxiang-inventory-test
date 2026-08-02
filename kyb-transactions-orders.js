@@ -68,12 +68,19 @@ function openKybTxnModal(){
       <select id="kybTxnLoc"><option value="">請先選擇車型</option></select>
     </div>
     <div class="form-row" id="kybTxnCostRow"><label>進價（選填，每單位成本，只有進貨才需要；用於未來計算毛利，目前不會顯示在任何報表）</label><input type="number" id="kybTxnCost" min="0" step="0.01" placeholder="例如 1500"></div>
+    <div id="kybTxnSaleRows" class="hidden">
+      <div class="form-row"><label>客戶姓名（銷貨必填，可輸入關鍵字搜尋並點選帶入）</label><input type="text" id="kybTxnCustomerName" autocomplete="off"><div class="autocomplete-list hidden" id="kybTxnCustomerList"></div></div>
+      <div class="form-row"><label>聯絡方式</label><input type="text" id="kybTxnCustomerContact"></div>
+      <section class="sales-pricing-box" id="kybTxnPriceBox" data-sales-source="kyb"><div class="sales-pricing-title">銷售金額與稅別</div><div class="form-row"><label>套用價目表</label><select id="kybTxnPricePriceList"><option value="">請先選擇品項</option></select></div><div class="form-row"><label>單價</label><input type="number" min="0" step="1" inputmode="numeric" id="kybTxnPriceUnitPrice" placeholder="請輸入實際成交單價"></div><div class="form-row"><label>稅別</label><select id="kybTxnPriceTaxMode"><option value="no_tax">不計稅</option><option value="tax_included">稅內含（5%）</option><option value="tax_excluded">稅外加（5%）</option></select></div><div class="sales-pricing-summary" id="kybTxnPriceSummary"></div></section>
+    </div>
     <div class="form-actions">
       <button onclick="closeModal()">取消</button>
       <button class="primary" id="kybTxnSubmitBtn">確認送出</button>
     </div>`;
   openModal(html);
   let selectedItemId = null;
+  bindOrderCustomerLookup("kybTxnCustomerName","kybTxnCustomerContact","kybTxnCustomerList");
+  const txnPricing=bindSalesPricing("kybTxnPrice","kyb",()=>kybItemsCache.find(i=>i.id===selectedItemId),()=>Number(document.getElementById("kybTxnQty").value)||0,null,"kybTxnQty");
 
   function refreshLocOptions(){
     const type = document.getElementById("kybTxnType").value;
@@ -86,8 +93,11 @@ function openKybTxnModal(){
     } else {
       costRow.classList.remove("hidden");
     }
-    if(!it){ locSelect.innerHTML = `<option value="">請先選擇車型</option>`; return; }
-    if(type === "out"){
+    const saleRows=document.getElementById("kybTxnSaleRows");
+    if(type === "out") saleRows.classList.remove("hidden"); else saleRows.classList.add("hidden");
+    if(!it){ locSelect.innerHTML = `<option value="">請先選擇車型</option>`; txnPricing.setItem(null); return; }
+    if(type === "out"){ txnPricing.setItem(it);
+
       const options = kybLocList(it);
       window._kybTxnOutOptions = options;
       locSelect.innerHTML = options.length
@@ -137,8 +147,15 @@ function openKybTxnModal(){
     }
     const costInput = document.getElementById("kybTxnCost").value;
     const unitCost = (type === "in" && costInput !== "") ? Number(costInput) : null;
+    let saleData={};
+    if(type === "out"){
+      const customerInput=document.getElementById("kybTxnCustomerName");
+      const customerName=customerInput.value.trim();
+      if(!customerName){alert("銷貨請輸入客戶姓名");return;}
+      try{saleData={customerId:customerInput.dataset.partyId||null,customerCode:customerInput.dataset.partyCode||"",customerContactPerson:customerInput.dataset.partyContact||"",customerName,customerContact:document.getElementById("kybTxnCustomerContact").value.trim(),salesperson:currentUser.name,...readSalesPricing("kybTxnPrice",qty)};}catch(e){alert(e.message);return;}
+    }
     try{
-      await submitKybTxn(selectedItemId, type, qty, loc, unitCost);
+      await submitKybTxn(selectedItemId, type, qty, loc, unitCost, saleData);
     }catch(e){
       console.error("KYB 進銷貨送出失敗：", e);
       alert("送出失敗：" + (e.message || "資料庫拒絕寫入。請聯絡管理者確認 Firebase 權限。"));
@@ -184,11 +201,13 @@ function openEditKybTxnModal(txnId){
     </div>
     <div class="form-row"><label>業務</label><input type="text" id="editKybTxnSalesperson" value="${escapeHtml(t.salesperson||"")}"></div>
     <div class="form-row"><label>客戶姓名</label><input type="text" id="editKybTxnCustomerName" value="${escapeHtml(t.customerName||"")}"></div>
+    <div id="kybEditTxnPriceWrap" class="${t.type==='out'?'':'hidden'}">${salesPricingHtml("kybEditTxnPrice","kyb")}</div>
     <div class="form-actions">
       <button onclick="closeModal()">取消</button>
       <button class="primary" id="editKybTxnSaveBtn">儲存</button>
     </div>`;
   openModal(html);
+  const editPricing=t.type==="out"?bindSalesPricing("kybEditTxnPrice","kyb",()=>item,()=>Number(document.getElementById("editKybTxnQty").value)||0,t,"editKybTxnQty"):null;
 
   document.getElementById("editKybTxnSaveBtn").addEventListener("click", async ()=>{
     const newDate = document.getElementById("editKybTxnDate").value || todayStr();
@@ -198,8 +217,10 @@ function openEditKybTxnModal(txnId){
     const newCustomerName = document.getElementById("editKybTxnCustomerName").value.trim();
     if(!newQty || newQty<=0){ alert("請輸入正確的數量"); return; }
     if(!newLoc){ alert("請選擇儲位"); return; }
+    let saleData={};
+    if(t.type==="out"){try{saleData=readSalesPricing("kybEditTxnPrice",newQty);}catch(e){alert(e.message);return;}}
     try{
-      await saveEditKybTxn(t, { date:newDate, qty:newQty, loc:newLoc, salesperson:newSalesperson, customerName:newCustomerName });
+      await saveEditKybTxn(t, { date:newDate, qty:newQty, loc:newLoc, salesperson:newSalesperson, customerName:newCustomerName, ...saleData });
       closeModal();
     }catch(e){
       alert("儲存失敗："+e.message);
@@ -235,9 +256,10 @@ async function saveEditKybTxn(t, next){
   await db.collection("kybTransactions").doc(t.id).update({
     date: next.date, qty: next.qty, loc: next.loc,
     salesperson: next.salesperson, customerName: next.customerName,
+    ...(t.type==="out"?salesPricingStoredFields(next,next.qty):{}),
     editLog: firebase.firestore.FieldValue.arrayUnion({
-      before: { date:t.date||null, qty:t.qty, loc:t.loc, salesperson:t.salesperson||"", customerName:t.customerName||"" },
-      after: { date:next.date, qty:next.qty, loc:next.loc, salesperson:next.salesperson, customerName:next.customerName },
+      before: { date:t.date||null, qty:t.qty, loc:t.loc, salesperson:t.salesperson||"", customerName:t.customerName||"", unitPrice:Number(t.unitPrice)||0, taxMode:t.taxMode||"no_tax" },
+      after: { date:next.date, qty:next.qty, loc:next.loc, salesperson:next.salesperson, customerName:next.customerName, unitPrice:Number(next.unitPrice)||0, taxMode:next.taxMode||"no_tax" },
       time: new Date().toISOString(), by: currentUser.name
     })
   });
@@ -569,12 +591,13 @@ async function saveKybOrderEdit(order,change){
 }
 function openEditKybOrderModal(orderId){
   const order=kybOrdersCache.find(o=>o.id===orderId);if(!order)return;let selectedItemId=order.itemId,locOptions=[];
-  const html=`<div class="sheet-head"><h2>修改訂單與預留</h2><button class="sheet-close" onclick="closeModal()">✕</button></div><div class="form-row"><label>搜尋車型（需要換車型才輸入）</label><input type="text" id="editKybOrderItemSearch" placeholder="例如 Altis"><div class="autocomplete-list hidden" id="editKybOrderItemList"></div></div><div class="form-row"><label>目前車型</label><input type="text" id="editKybOrderItemLabel" value="${escapeHtml(order.itemLabel||'')}" disabled></div><div class="form-row"><label>預留儲位</label><select id="editKybOrderLoc"></select></div><div class="form-row"><label>數量</label><input type="number" id="editKybOrderQty" min="1" value="${order.qty}"></div><div class="form-row"><label>客戶姓名</label><input type="text" id="editKybOrderCustomerName" value="${escapeHtml(order.customerName||'')}"></div><div class="form-row"><label>聯絡方式</label><input type="text" id="editKybOrderCustomerContact" value="${escapeHtml(order.customerContact||'')}"></div><div class="form-row"><label>備註</label><input type="text" id="editKybOrderCustomerNote" value="${escapeHtml(order.customerNote||'')}"></div><div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="editKybOrderSaveBtn">儲存並重新預留</button></div>`;
+  const html=`<div class="sheet-head"><h2>修改訂單與預留</h2><button class="sheet-close" onclick="closeModal()">✕</button></div><div class="form-row"><label>搜尋車型（需要換車型才輸入）</label><input type="text" id="editKybOrderItemSearch" placeholder="例如 Altis"><div class="autocomplete-list hidden" id="editKybOrderItemList"></div></div><div class="form-row"><label>目前車型</label><input type="text" id="editKybOrderItemLabel" value="${escapeHtml(order.itemLabel||'')}" disabled></div><div class="form-row"><label>預留儲位</label><select id="editKybOrderLoc"></select></div><div class="form-row"><label>數量</label><input type="number" id="editKybOrderQty" min="1" value="${order.qty}"></div><div class="form-row"><label>客戶姓名</label><input type="text" id="editKybOrderCustomerName" value="${escapeHtml(order.customerName||'')}"></div><div class="form-row"><label>聯絡方式</label><input type="text" id="editKybOrderCustomerContact" value="${escapeHtml(order.customerContact||'')}"></div><div class="form-row"><label>備註</label><input type="text" id="editKybOrderCustomerNote" value="${escapeHtml(order.customerNote||'')}"></div><section class="sales-pricing-box" id="kybEditOrderPriceBox" data-sales-source="kyb"><div class="sales-pricing-title">銷售金額與稅別</div><div class="form-row"><label>套用價目表</label><select id="kybEditOrderPricePriceList"><option value="">請先選擇品項</option></select></div><div class="form-row"><label>單價</label><input type="number" min="0" step="1" inputmode="numeric" id="kybEditOrderPriceUnitPrice" placeholder="請輸入實際成交單價"></div><div class="form-row"><label>稅別</label><select id="kybEditOrderPriceTaxMode"><option value="no_tax">不計稅</option><option value="tax_included">稅內含（5%）</option><option value="tax_excluded">稅外加（5%）</option></select></div><div class="sales-pricing-summary" id="kybEditOrderPriceSummary"></div></section><div class="form-actions"><button onclick="closeModal()">取消</button><button class="primary" id="editKybOrderSaveBtn">儲存並重新預留</button></div>`;
   openModal(html);
+  const editPricing=bindSalesPricing("kybEditOrderPrice","kyb",()=>kybItemsCache.find(i=>i.id===selectedItemId),()=>Number(document.getElementById("editKybOrderQty").value)||0,order,"editKybOrderQty");
   const renderLocs=()=>{const item=kybItemsCache.find(i=>i.id===selectedItemId);locOptions=item?kybLocList(item).map(o=>({...o,available:kybAvailableAt(item,o.code,order.reservationId)})).filter(o=>o.available>0):[];const select=document.getElementById("editKybOrderLoc");if(!locOptions.length){select.innerHTML='<option value="">目前沒有可用庫存</option>';return;}let selected=locOptions.findIndex(o=>o.code===order.loc);if(selected<0)selected=0;select.innerHTML=locOptions.map((o,i)=>`<option value="${i}" ${i===selected?"selected":""}>${escapeHtml(o.code)}（庫存 ${o.qty}／可用 ${o.available}）</option>`).join("");};
   renderLocs();
-  const search=document.getElementById("editKybOrderItemSearch");search.addEventListener("input",()=>{const q=norm(search.value),list=document.getElementById("editKybOrderItemList");if(!q){list.classList.add("hidden");return;}const matches=kybItemsCache.filter(it=>norm(it.carModel).includes(q)).slice(0,15);list.innerHTML=matches.map(it=>`<div data-id="${it.id}">${escapeHtml(kybItemLabel(it))}</div>`).join("");list.classList.toggle("hidden",matches.length===0);list.querySelectorAll("div").forEach(d=>d.addEventListener("click",()=>{selectedItemId=d.dataset.id;const it=kybItemsCache.find(x=>x.id===selectedItemId);document.getElementById("editKybOrderItemLabel").value=kybItemLabel(it);list.classList.add("hidden");search.value="";renderLocs();}));});
-  document.getElementById("editKybOrderSaveBtn").addEventListener("click",async()=>{const qty=Number(document.getElementById("editKybOrderQty").value),opt=locOptions[Number(document.getElementById("editKybOrderLoc").value)],item=kybItemsCache.find(i=>i.id===selectedItemId);const customerName=document.getElementById("editKybOrderCustomerName").value.trim(),customerContact=document.getElementById("editKybOrderCustomerContact").value.trim(),customerNote=document.getElementById("editKybOrderCustomerNote").value.trim();if(!item||!opt||!qty||qty<=0){alert("請選擇有可用量的車型、儲位與數量");return;}if(!customerName){alert("請輸入客戶姓名");return;}try{await saveKybOrderEdit(order,{itemId:item.id,itemLabel:`${item.carModel}（KYB）`,qty,loc:opt.code,customerName,customerContact,customerNote});closeModal();}catch(e){alert("儲存失敗："+e.message);}});
+  const search=document.getElementById("editKybOrderItemSearch");search.addEventListener("input",()=>{const q=norm(search.value),list=document.getElementById("editKybOrderItemList");if(!q){list.classList.add("hidden");return;}const matches=kybItemsCache.filter(it=>norm(it.carModel).includes(q)).slice(0,15);list.innerHTML=matches.map(it=>`<div data-id="${it.id}">${escapeHtml(kybItemLabel(it))}</div>`).join("");list.classList.toggle("hidden",matches.length===0);list.querySelectorAll("div").forEach(d=>d.addEventListener("click",()=>{selectedItemId=d.dataset.id;const it=kybItemsCache.find(x=>x.id===selectedItemId);document.getElementById("editKybOrderItemLabel").value=kybItemLabel(it);list.classList.add("hidden");search.value="";renderLocs();editPricing.setItem(it);}));});
+  document.getElementById("editKybOrderSaveBtn").addEventListener("click",async()=>{const qty=Number(document.getElementById("editKybOrderQty").value),opt=locOptions[Number(document.getElementById("editKybOrderLoc").value)],item=kybItemsCache.find(i=>i.id===selectedItemId);const customerName=document.getElementById("editKybOrderCustomerName").value.trim(),customerContact=document.getElementById("editKybOrderCustomerContact").value.trim(),customerNote=document.getElementById("editKybOrderCustomerNote").value.trim();if(!item||!opt||!qty||qty<=0){alert("請選擇有可用量的車型、儲位與數量");return;}if(!customerName){alert("請輸入客戶姓名");return;}let pricing;try{pricing=readSalesPricing("kybEditOrderPrice",qty);}catch(e){alert(e.message);return;}try{await saveKybOrderEdit(order,{itemId:item.id,itemLabel:`${item.carModel}（KYB）`,qty,loc:opt.code,customerName,customerContact,customerNote,...pricing});closeModal();}catch(e){alert("儲存失敗："+e.message);}});
 }
 
 
@@ -629,7 +652,7 @@ async function confirmKybOrder(order,loc){
     const item={id:live.itemId,...itemSnap.data()},physical=kybLocQty((item.locations||{})[loc]),selectedReserved=reservationBalanceQty(selectedBalanceSnap),ownReserved=res&&oldBalanceRef.path===selectedBalanceRef.path?Number(res.qty||0):0,available=physical-Math.max(0,selectedReserved-ownReserved);
     if(live.qty>available)throw new Error(`這個儲位可用庫存只剩 ${Math.max(0,available)}，請改選其他儲位`);
     const allLocs={...(item.locations||{})},next=physical-live.qty;if(next>0)allLocs[loc]=next;else delete allLocs[loc];
-    const now=new Date().toISOString(),txnRef=db.collection("kybTransactions").doc();tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId:live.itemId,type:"out",qty:live.qty,loc,date:todayStr(),operator:currentUser.name,salesperson:live.requestedByName||"",customerName:live.customerName||"",customerContact:live.customerContact||"",customerNote:live.customerNote||"",orderId:order.id,reservationId:live.reservationId||null,editLog:[],createdAt:now});
+    const now=new Date().toISOString(),txnRef=db.collection("kybTransactions").doc();tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId:live.itemId,type:"out",qty:live.qty,loc,date:todayStr(),operator:currentUser.name,salesperson:live.requestedByName||"",customerName:live.customerName||"",customerContact:live.customerContact||"",customerNote:live.customerNote||"",...salesPricingStoredFields(live,live.qty),orderId:order.id,reservationId:live.reservationId||null,editLog:[],createdAt:now});
     if(res){writeReservationBalance(tx,oldBalanceRef,"kyb",res.itemId,res.loc,null,reservationBalanceQty(oldBalanceSnap)-Number(res.qty||0));tx.update(resRef,{status:"consumed",consumedAt:now,consumedBy:currentUser.name,fulfilledLoc:loc});}
     tx.update(orderRef,{status:"confirmed",confirmedAt:now,confirmedBy:currentUser.name,linkedTxnId:txnRef.id,reservationStatus:res?"consumed":live.reservationStatus||null});return txnRef;
   });
@@ -648,13 +671,13 @@ async function saveKybOrderEdit(order,change){
     tx.update(orderRef,{...change,reservationId:reservationRef.id,reservationStatus:"active",updatedAt:now,updatedBy:currentUser.name});
   });
 }
-async function submitKybTxn(itemId,type,qty,loc,unitCost){
+async function submitKybTxn(itemId,type,qty,loc,unitCost,saleData={}){
   const itemRef=db.collection("kybItems").doc(itemId);
   await db.runTransaction(async tx=>{
     const itemSnap=await tx.get(itemRef);if(!itemSnap.exists)throw new Error("找不到車型");const item=itemSnap.data(),allLocs={...(item.locations||{})},current=kybLocQty(allLocs[loc]);
     const balanceRef=reservationBalanceRef("kyb",itemId,loc,null),balanceSnap=type==="out"?await tx.get(balanceRef):null;
     if(type==="out"){const available=current-reservationBalanceQty(balanceSnap);if(qty>available)throw new Error(`可用庫存只有 ${Math.max(0,available)}，不能扣除已預留數量`);}
     const next=type==="in"?current+qty:current-qty;if(next<0)throw new Error("庫存不足，無法出貨");if(next>0)allLocs[loc]=next;else delete allLocs[loc];
-    const now=new Date().toISOString(),txnRef=db.collection("kybTransactions").doc();tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId,type,qty,loc,date:todayStr(),operator:currentUser.name,editLog:[],unitCost:(type==="in"&&unitCost!=null&&Number.isFinite(unitCost))?unitCost:null,createdAt:now});
+    const now=new Date().toISOString(),txnRef=db.collection("kybTransactions").doc();tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId,type,qty,loc,date:todayStr(),operator:currentUser.name,editLog:[],unitCost:(type==="in"&&unitCost!=null&&Number.isFinite(unitCost))?unitCost:null,...(type==="out"?{customerId:saleData.customerId||null,customerCode:saleData.customerCode||"",customerContactPerson:saleData.customerContactPerson||"",customerName:saleData.customerName||"",customerContact:saleData.customerContact||"",salesperson:saleData.salesperson||currentUser.name,...salesPricingStoredFields(saleData,qty)}:{}),createdAt:now});
   });await refreshKybViews();closeModal();
 }
