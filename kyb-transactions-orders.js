@@ -653,8 +653,9 @@ async function confirmKybOrder(order,loc){
     if(live.qty>available)throw new Error(`這個儲位可用庫存只剩 ${Math.max(0,available)}，請改選其他儲位`);
     const allLocs={...(item.locations||{})},next=physical-live.qty;if(next>0)allLocs[loc]=next;else delete allLocs[loc];
     const now=new Date().toISOString(),txnRef=db.collection("kybTransactions").doc();tx.update(itemRef,{locations:allLocs});tx.set(txnRef,{itemId:live.itemId,type:"out",qty:live.qty,loc,date:todayStr(),operator:currentUser.name,salesperson:live.requestedByName||"",customerName:live.customerName||"",customerContact:live.customerContact||"",customerNote:live.customerNote||"",...salesPricingStoredFields(live,live.qty),orderId:order.id,reservationId:live.reservationId||null,editLog:[],createdAt:now});
+    const erpDraftRef=createErpShipmentDraft(tx,{sourceType:"kyb",transactionRef:txnRef,order:live,orderId:order.id,date:todayStr(),now});
     if(res){writeReservationBalance(tx,oldBalanceRef,"kyb",res.itemId,res.loc,null,reservationBalanceQty(oldBalanceSnap)-Number(res.qty||0));tx.update(resRef,{status:"consumed",consumedAt:now,consumedBy:currentUser.name,fulfilledLoc:loc});}
-    tx.update(orderRef,{status:"confirmed",confirmedAt:now,confirmedBy:currentUser.name,linkedTxnId:txnRef.id,reservationStatus:res?"consumed":live.reservationStatus||null});return txnRef;
+    tx.update(orderRef,{status:"confirmed",confirmedAt:now,confirmedBy:currentUser.name,linkedTxnId:txnRef.id,erpSalesOrderId:erpDraftRef.id,reservationStatus:res?"consumed":live.reservationStatus||null});return txnRef;
   });
 }
 async function saveKybOrderEdit(order,change){
