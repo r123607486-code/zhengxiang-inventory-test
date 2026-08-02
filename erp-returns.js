@@ -40,6 +40,17 @@ function erpReturnTotals(invoice,lines){
   const lineAmount=lines.reduce((sum,line)=>sum+(Number(line.quantity)||0)*(Number(line.unitPrice)||0),0);
   return salesPricingTotals({lineAmount,taxMode:invoice.taxMode||"no_tax"});
 }
+function erpReturnManualTotals(invoice,amount){
+  const totalAmount=Math.round(Math.max(0,Number(amount)||0));
+  if(!totalAmount) throw new Error("請輸入大於 0 的折讓含稅總額。");
+  const taxMode=invoice.taxMode||"no_tax";
+  if(taxMode==="tax_excluded"){
+    const taxAmount=Math.round(totalAmount*SALES_TAX_RATE/(1+SALES_TAX_RATE));
+    const subtotal=totalAmount-taxAmount;
+    return {lineAmount:subtotal,subtotal,taxAmount,totalAmount,taxRate:SALES_TAX_RATE,taxMode};
+  }
+  return salesPricingTotals({lineAmount:totalAmount,taxMode});
+}
 function erpReturnNo(){
   const d=new Date(),two=n=>String(n).padStart(2,"0");
   return "SR-"+d.getFullYear()+two(d.getMonth()+1)+two(d.getDate())+"-"+two(d.getHours())+two(d.getMinutes())+two(d.getSeconds())+"-"+String(d.getMilliseconds()).padStart(3,"0");
@@ -127,9 +138,14 @@ async function createErpSalesReturn(invoice,form){
   const type=form.elements.returnType.value;
   if(type==="stock_return"&&!userHasAnyRole("admin")) return alert("實體退貨會回補庫存，目前只允許管理者確認。請改由管理者帳號操作。");
   if(!invoice.ledgerId) return alert("這是舊版發票，尚未有新通用應收帳；目前只支援新版月結發票建立退回／折讓。");
-  let inputLines;
-  try{inputLines=erpReturnCollectLines(invoice,form,type);}catch(error){return alert(error.message||"退回明細不正確。");}
-  const preview=erpReturnTotals(invoice,inputLines);
+  let inputLines=[],preview;
+  try{
+    if(type==="allowance") preview=erpReturnManualTotals(invoice,form.elements.manualAmount.value);
+    else{
+      inputLines=erpReturnCollectLines(invoice,form,type);
+      preview=erpReturnTotals(invoice,inputLines);
+    }
+  }catch(error){return alert(error.message||"退回明細不正確。");}
   if(!confirm("確認建立「"+erpReturnTypeLabel(type)+"」？本次將沖回 NT$ "+erpMoney(preview.totalAmount)+(type==="stock_return"?"，並回補指定儲位庫存。":"，不會異動庫存。"))) return;
   const returnRef=db.collection("erpSalesReturns").doc();
   const settlementRef=db.collection(ERP_ACCOUNTING.settlements).doc();
@@ -145,7 +161,7 @@ async function createErpSalesReturn(invoice,form){
       if(!ledgerSnap.exists||ledgerSnap.data().status==="void") throw new Error("找不到有效應收帳。");
       const returned={...(liveInvoice.returnedQuantities||{})};
       const liveLines=Array.isArray(liveInvoice.lines)?liveInvoice.lines:[];
-      const lines=inputLines.map(input=>{
+      const lines=type==="stock_return"?inputLines.map(input=>{
         const original=liveLines[input.lineIndex];
         if(!original) throw new Error("發票明細已變更，請重新整理後再試。");
         const sold=Math.max(0,Number(original.quantity)||0);
@@ -153,8 +169,10 @@ async function createErpSalesReturn(invoice,form){
         if(input.quantity>sold-used) throw new Error("「"+(original.itemName||"品項")+"」已被其他退回單使用，請重新整理後再試。");
         returned[String(input.lineIndex)]=used+input.quantity;
         return {...input,itemName:original.itemName||input.itemName,unitPrice:Number(original.unitPrice)||0};
-      });
-      const totals=erpReturnTotals(liveInvoice,lines);
+      }):[];
+      const totals=type==="allowance"
+        ? erpReturnManualTotals(liveInvoice,preview.totalAmount)
+        : erpReturnTotals(liveInvoice,lines);
       const ledger=ledgerSnap.data();
       if(totals.totalAmount>erpAccountingNumber(ledger.balanceAmount)) throw new Error("退回／折讓金額超過目前未收餘額。若此發票已收款，請先處理退款或作廢收款。");
       const itemSnapshots=new Map();
@@ -185,7 +203,7 @@ async function createErpSalesReturn(invoice,form){
       tx.set(settlementRef,{settlementNo:"CR-"+erpReturnNo().slice(3),settlementType:"return_credit",direction:"credit",settlementDate:form.elements.returnDate.value,amount:totals.totalAmount,method:type==="stock_return"?"退貨折抵":"帳務折讓",referenceNo:liveInvoice.invoiceNo||"",notes:(form.elements.reason.value||"").trim(),partyId:ledger.partyId||null,partyName:ledger.partyName||liveInvoice.customerName||"",allocations:[{ledgerId:ledgerRef.id,amount:totals.totalAmount}],status:"active",returnId:returnRef.id,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});
       tx.update(ledgerRef,{settledAmount:nextSettled,balanceAmount:erpAccountingBalance(ledger.originalAmount,nextSettled),status:erpAccountingStatus(ledger.originalAmount,nextSettled,false),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedByUid:currentUser.uid,updatedByName:currentUser.name});
       tx.update(invoiceRef,{returnedQuantities:returned,returnedAmount:erpAccountingNumber(liveInvoice.returnedAmount)+totals.totalAmount,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
-      tx.set(returnRef,{returnNo:erpReturnNo(),invoiceId:invoiceRef.id,invoiceNo:liveInvoice.invoiceNo||"",ledgerId:ledgerRef.id,settlementId:settlementRef.id,customerId:liveInvoice.customerId||null,customerName:liveInvoice.customerName||"",returnType:type,returnDate:form.elements.returnDate.value,reason:(form.elements.reason.value||"").trim(),lines,subtotalAmount:totals.subtotal,taxAmount:totals.taxAmount,totalAmount:totals.totalAmount,taxMode:liveInvoice.taxMode||"no_tax",status:"confirmed",stockTransactionIds,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});
+      tx.set(returnRef,{returnNo:erpReturnNo(),invoiceId:invoiceRef.id,invoiceNo:liveInvoice.invoiceNo||"",ledgerId:ledgerRef.id,settlementId:settlementRef.id,customerId:liveInvoice.customerId||null,customerName:liveInvoice.customerName||"",returnType:type,returnDate:form.elements.returnDate.value,reason:(form.elements.reason.value||"").trim(),manualAmount:type==="allowance"?totals.totalAmount:null,lines,subtotalAmount:totals.subtotal,taxAmount:totals.taxAmount,totalAmount:totals.totalAmount,taxMode:liveInvoice.taxMode||"no_tax",status:"confirmed",stockTransactionIds,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});
     });
     erpAccountingAudit("sales_return_created",returnRef.id,{invoiceId:invoice.id,returnType:type,totalAmount:preview.totalAmount});
     erpReturnFilter={invoiceId:""};
@@ -283,11 +301,37 @@ function renderErpReturns(){
     renderErpReturns();
   });
   const form=document.getElementById("erpSalesReturnForm");
-  if(form) form.addEventListener("submit",event=>{event.preventDefault();createErpSalesReturn(invoice,event.currentTarget);});
+  if(form){
+    const mode=form.elements.returnType,amount=form.elements.manualAmount;
+    const allowanceSection=document.getElementById("erpAllowanceAmountSection");
+    const stockLines=document.getElementById("erpStockReturnLines");
+    const hint=document.getElementById("erpAllowanceAmountHint");
+    const updateAllowanceHint=()=>{
+      if(!hint) return;
+      try{
+        const totals=erpReturnManualTotals(invoice,amount.value);
+        hint.textContent="本次折讓：未稅 NT$ "+erpMoney(totals.subtotal)+"｜營業稅 NT$ "+erpMoney(totals.taxAmount)+"｜含稅總額 NT$ "+erpMoney(totals.totalAmount);
+      }catch(_){
+        hint.textContent="請輸入本次要沖回的含稅金額；系統會依原發票稅別自動拆分未稅金額與營業稅。";
+      }
+    };
+    const updateReturnMode=()=>{
+      const allowance=mode.value==="allowance";
+      allowanceSection.hidden=!allowance;
+      stockLines.hidden=allowance;
+      amount.required=allowance;
+      stockLines.querySelectorAll("input,select").forEach(field=>field.disabled=allowance);
+      updateAllowanceHint();
+    };
+    mode.addEventListener("change",updateReturnMode);
+    amount.addEventListener("input",updateAllowanceHint);
+    updateReturnMode();
+    form.addEventListener("submit",event=>{event.preventDefault();createErpSalesReturn(invoice,event.currentTarget);});
+  }
   el.querySelectorAll("[data-erp-return-void]").forEach(button=>button.addEventListener("click",()=>voidErpSalesReturn(button.dataset.erpReturnVoid)));
 }
 function erpReturnFormHtml(invoice){
   if(!invoice.ledgerId) return '<section class="erp-panel"><div class="erp-empty"><strong>此為舊版發票。</strong><br>它沒有新通用應收帳，暫時不能建立退回／折讓；新版發票才可使用此功能。</div></section>';
   return '<section class="erp-panel"><div class="erp-panel-title"><div><p class="erp-kicker">CREATE CREDIT</p><h2>建立退回／折讓：'+erpEscape(invoice.invoiceNo)+'</h2><p>'+erpEscape(invoice.customerName)+'｜原發票 NT$ '+erpMoney(invoice.totalAmount)+'</p></div></div>'
-    + '<form id="erpSalesReturnForm" class="erp-form"><div class="erp-form-row"><label>處理日期<input name="returnDate" type="date" value="'+todayStr()+'" required></label><label>處理方式<select name="returnType"><option value="allowance">帳務折讓（不回補庫存）</option><option value="stock_return">退貨入庫（回補庫存，限管理者）</option></select></label></div><label>原因／備註<textarea name="reason" rows="2" placeholder="例如：客戶退回、價格折讓、瑕疵品"></textarea></label><div class="erp-return-lines">'+erpReturnBuildFormLines(invoice,"allowance")+'</div><div class="erp-form-actions"><button class="erp-primary">確認建立退回／折讓單</button></div></form></section>';
+    + '<form id="erpSalesReturnForm" class="erp-form"><div class="erp-form-row"><label>處理日期<input name="returnDate" type="date" value="'+todayStr()+'" required></label><label>處理方式<select name="returnType"><option value="allowance">帳務折讓（不回補庫存）</option><option value="stock_return">退貨入庫（回補庫存，限管理者）</option></select></label></div><label>原因／備註<textarea name="reason" rows="2" placeholder="例如：客戶折讓、瑕疵補償、退貨說明"></textarea></label><div id="erpAllowanceAmountSection" class="erp-return-lines"><label>折讓含稅總額<input name="manualAmount" type="number" min="1" step="1" inputmode="numeric" placeholder="例如 5000"></label><p id="erpAllowanceAmountHint" class="erp-form-hint">請輸入本次要沖回的含稅金額；系統會依原發票稅別自動拆分未稅金額與營業稅。</p></div><div id="erpStockReturnLines" class="erp-return-lines" hidden>'+erpReturnBuildFormLines(invoice,"stock_return")+'</div><div class="erp-form-actions"><button class="erp-primary">確認建立退回／折讓單</button></div></form></section>';
 }
