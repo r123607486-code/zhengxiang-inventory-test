@@ -1,12 +1,12 @@
 // ERP 共用核心：狀態、導覽、即時資料監聽與儀表板
 // ============================================================
-// ERP 管理中心（第一階段）
-// 範圍：客戶（往來對象主檔）、銷貨訂單草稿／送出／確認、即時儀表板。
-// 此模組不會扣輪胎或 KYB 庫存，也不會建立應收帳款。
+// ERP 管理中心
+// 範圍：往來對象、銷貨、發票、對帳單、退回折讓、進貨應付、通用帳務。
+// 此模組不會扣輪胎或 KYB 庫存。
 // ============================================================
-// 往來對象主檔：erpParties（取代舊的 erpCustomers），加了 type 欄位（目前固定 "customer"），
-// 是為了幫批12「應付端」的廠商資料鋪路——之後廠商也能共用同一張主檔表，只是 type 不同。
-// 舊的 erpCustomers collection 保留不刪，當備份；erp-customers.js 裡有一次性搬移按鈕可以把舊資料轉過來。
+// 往來對象主檔：erpParties（取代舊的 erpCustomers），用 type 區分 customer／vendor。
+// 監聽器統一由 core.js 的 startPartiesListener() 啟動，庫存端與 ERP 端共用同一份快取，
+// 避免兩邊各自監聽又各自覆寫，造成廠商清單偶爾整個消失。
 
 let erpPartiesCache = [];
 let erpSalesOrdersCache = [];
@@ -124,6 +124,11 @@ function buildErpWorkspace(){
   document.getElementById("erpWhoLabel").textContent = currentUser.name + "｜" + userRolesLabel(currentUser.roles);
   document.getElementById("erpBackBtn").addEventListener("click", showCategoryScreen);
   app.querySelectorAll("[data-erp-view]").forEach(btn => btn.addEventListener("click", () => showErpView(btn.dataset.erpView)));
+  // 使用者離開輸入欄位後，把剛才因為「正在打字」而暫緩的重畫補上。
+  app.addEventListener("focusout", ()=>{
+    if(!erpRenderPending) return;
+    window.setTimeout(()=>{ if(erpRenderPending && !erpViewIsBusy()) renderErpViews(true); }, 200);
+  });
 }
 
 function showErpView(view){
@@ -132,16 +137,13 @@ function showErpView(view){
   const active = document.getElementById("erp-page-" + erpView);
   if(active) active.classList.remove("hidden");
   document.querySelectorAll("[data-erp-view]").forEach(btn => btn.classList.toggle("active", btn.dataset.erpView === erpView));
-  renderErpViews();
+  renderErpViews(true);
 }
 
 function startErpListeners(){
   if(erpListenersStarted) return;
   erpListenersStarted = true;
-  db.collection("erpParties").onSnapshot(snap => {
-    erpPartiesCache = snap.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => (a.name || "").localeCompare(b.name || "", "zh-Hant"));
-    renderErpViews();
-  }, err => erpShowDataError(err));
+  startPartiesListener();
   db.collection("erpSalesOrders").onSnapshot(snap => {
     erpSalesOrdersCache = snap.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => {
       const av = a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
@@ -207,19 +209,37 @@ function erpShowDataError(err){
   }
 }
 
-function renderErpViews(){
-  if(!document.getElementById("erpApp") || document.getElementById("erpApp").classList.contains("hidden")) return;
-  renderErpDashboard();
-  renderErpParties();
-  renderErpVendors();
-  renderErpSales();
-  renderErpTransfers();
-  renderErpInvoices();
-  renderErpStatements();
-  renderErpReturns();
-  renderErpProfitability();
-  renderErpPurchases();
-  renderErpAccounting();
+// 每個側邊欄頁面對應的繪製函式。以前是任何一個監聽器有動靜就把 11 個頁面全部重畫，
+// 會把使用者正在填寫的進貨單／廠商表單整個清掉；現在只重畫目前看到的那一頁。
+const ERP_VIEW_RENDERERS = {
+  dashboard: () => renderErpDashboard(),
+  customers: () => renderErpParties(),
+  vendors: () => renderErpVendors(),
+  sales: () => renderErpSales(),
+  transfers: () => renderErpTransfers(),
+  invoices: () => renderErpInvoices(),
+  statements: () => renderErpStatements(),
+  returns: () => renderErpReturns(),
+  profitability: () => renderErpProfitability(),
+  purchases: () => renderErpPurchases(),
+  accounting: () => renderErpAccounting()
+};
+let erpRenderPending = false;
+// 游標正停在目前頁面的輸入欄位裡時，代表使用者正在打字，這時候不要重畫。
+function erpViewIsBusy(){
+  const active = document.activeElement;
+  if(!active) return false;
+  const page = document.getElementById("erp-page-" + erpView);
+  if(!page || !page.contains(active)) return false;
+  return active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT";
+}
+function renderErpViews(force){
+  const app = document.getElementById("erpApp");
+  if(!app || app.classList.contains("hidden")) return;
+  if(!force && erpViewIsBusy()){ erpRenderPending = true; return; }
+  erpRenderPending = false;
+  const render = ERP_VIEW_RENDERERS[erpView];
+  if(typeof render === "function") render();
 }
 
 function renderErpDashboard(){
