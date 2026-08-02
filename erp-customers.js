@@ -36,29 +36,6 @@ function renderErpParties(){
   el.querySelectorAll("[data-party-code]").forEach(btn => btn.addEventListener("click", () => editErpPartyCode(btn.dataset.partyCode)));
 }
 
-async function saveErpParty(event){
-  event.preventDefault();
-  const form = event.currentTarget;
-  const name = form.elements.name.value.trim();
-  if(!name) return;
-  const btn = form.querySelector("button[type=submit]");
-  btn.disabled = true; btn.textContent = "儲存中…";
-  try{
-    await db.collection("erpParties").add({
-      type:"customer",
-      name, contact:form.elements.contact.value.trim(), phone:form.elements.phone.value.trim(),
-      taxId:form.elements.taxId.value.trim(), paymentTerms:form.elements.paymentTerms.value.trim(),
-      creditLevel: form.elements.creditLevel.value || "正常",
-      address:form.elements.address.value.trim(), notes:form.elements.notes.value.trim(),
-      active:true, createdAt:firebase.firestore.FieldValue.serverTimestamp(),
-      createdByUid:currentUser.uid, createdByName:currentUser.name
-    });
-    form.reset();
-  }catch(err){
-    console.error(err); alert("客戶儲存失敗，請確認 Firebase Rules 已加入 ERP 權限後再試一次。");
-  }finally{ btn.disabled=false; btn.innerHTML=ERP_ICONS.add + " 儲存客戶"; }
-}
-
 // 一次性搬移：把舊的 erpCustomers 資料複製到新的 erpParties，沿用原本的文件 ID
 // （這樣既有銷貨單／發票裡存的 customerId 不會失效），舊 collection 保留不刪，當備份。
 // 用 doc(id).set(...) 覆蓋寫入，重複點擊不會產生重複資料，只會覆蓋成一樣的內容。
@@ -135,7 +112,7 @@ async function setErpPartyCode(partyId, requestedCode){
 }
 
 
-// 覆寫原本儲存：新增客戶可指定 CS 編號或自動帶號。
+// 儲存客戶：可指定 CS 編號或留空自動帶號，整段用交易寫入避免撞號。
 async function saveErpParty(event){
   event.preventDefault();
   const form = event.currentTarget;
