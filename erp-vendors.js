@@ -1,14 +1,23 @@
 // ERP 廠商主檔：共用 erpParties，type 固定為 vendor。
+// 廠商編號比照客戶，使用 erpPartyCodeIndex 索引 + erpSystemCounters 計數器，
+// 全部在同一個 Firestore transaction 內完成，避免兩個人同時新增拿到同一個 VN 編號。
 let erpVendorEditingId=null;
 function erpVendors(){
   return erpPartiesCache.filter(party=>party.type==="vendor");
 }
-function erpVendorCode(){
-  const max=erpVendors().reduce((largest,vendor)=>{
-    const match=String(vendor.partyCode||"").match(/^VN(\d+)$/i);
-    return match?Math.max(largest,Number(match[1])):largest;
-  },0);
-  return "VN"+String(max+1).padStart(4,"0");
+function normalizeVendorCode(value){ return String(value||"").replace(/\s+/g,"").toUpperCase(); }
+function isValidVendorCode(value){ return /^VN\d{4,}$/.test(value); }
+async function allocateVendorCode(transaction, partyId){
+  const counterRef=db.collection("erpSystemCounters").doc("vendorCode");
+  const counterSnap=await transaction.get(counterRef);
+  let next=Math.max(1,Number(counterSnap.exists?counterSnap.data().nextNumber:1)||1);
+  for(let safety=0; safety<10000; safety++, next++){
+    const code="VN"+String(next).padStart(4,"0");
+    const indexRef=db.collection("erpPartyCodeIndex").doc(code);
+    const indexSnap=await transaction.get(indexRef);
+    if(!indexSnap.exists||indexSnap.data().partyId===partyId) return {code,indexRef,counterRef,nextNumber:next+1};
+  }
+  throw new Error("無法配置廠商編號，請聯絡管理者。");
 }
 function renderErpVendors(){
   const el=document.getElementById("erp-page-vendors");
@@ -17,7 +26,7 @@ function renderErpVendors(){
   const vendors=erpVendors().slice().sort((a,b)=>(a.partyCode||a.name||"").localeCompare((b.partyCode||b.name||""),"zh-Hant"));
   el.innerHTML='<div class="erp-page-heading"><div><p class="erp-kicker">VENDOR DIRECTORY</p><h1>廠商管理</h1><p>廠商與客戶共用往來對象主檔，但進貨與應付帳會獨立管理。</p></div></div>'
     + '<div class="erp-content-grid"><section class="erp-panel erp-form-panel"><div class="erp-panel-title"><h2>'+(editing?"修改廠商":"新增廠商")+'</h2></div><form id="erpVendorForm" class="erp-form">'
-    + '<label>廠商編號<input name="partyCode" maxlength="20" value="'+erpEscape(editing?editing.partyCode:erpVendorCode())+'"><small>預設格式：VN0001，可由管理者修改。</small></label>'
+    + '<label>廠商編號<input name="partyCode" maxlength="20" placeholder="留空自動產生 VN0001" value="'+erpEscape(editing?(editing.partyCode||""):"")+'"><small>格式：VN0001；留空會自動取下一個可用編號。</small></label>'
     + '<label>廠商名稱 <b>*</b><input name="name" required maxlength="80" value="'+erpEscape(editing?editing.name:"")+'"></label>'
     + '<div class="erp-form-row"><label>聯絡人<input name="contact" maxlength="40" value="'+erpEscape(editing?editing.contact:"")+'"></label><label>聯絡電話<input name="phone" maxlength="30" value="'+erpEscape(editing?editing.phone:"")+'"></label></div>'
     + '<div class="erp-form-row"><label>統一編號<input name="taxId" maxlength="20" value="'+erpEscape(editing?editing.taxId:"")+'"></label><label>付款條件<input name="paymentTerms" maxlength="40" placeholder="例如：月結 30 天" value="'+erpEscape(editing?editing.paymentTerms:"")+'"></label></div>'
@@ -34,16 +43,50 @@ function renderErpVendors(){
 async function saveErpVendor(event){
   event.preventDefault();
   const form=event.currentTarget;
-  const code=(form.elements.partyCode.value||"").trim().toUpperCase();
+  const requested=normalizeVendorCode(form.elements.partyCode.value);
   const name=(form.elements.name.value||"").trim();
   if(!name) return alert("請填寫廠商名稱。");
-  if(code&&erpVendors().some(vendor=>vendor.id!==erpVendorEditingId&&String(vendor.partyCode||"").toUpperCase()===code)) return alert("廠商編號已存在，請換一個編號。");
-  const data={type:"vendor",partyCode:code,name,contact:(form.elements.contact.value||"").trim(),phone:(form.elements.phone.value||"").trim(),taxId:(form.elements.taxId.value||"").trim(),paymentTerms:(form.elements.paymentTerms.value||"").trim(),address:(form.elements.address.value||"").trim(),notes:(form.elements.notes.value||"").trim(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedByUid:currentUser.uid,updatedByName:currentUser.name};
+  if(requested&&!isValidVendorCode(requested)) return alert("廠商編號格式需為 VN0001。");
+  const editingId=erpVendorEditingId;
+  const partyRef=editingId?db.collection("erpParties").doc(editingId):db.collection("erpParties").doc();
+  const fields={
+    type:"vendor",name,
+    contact:(form.elements.contact.value||"").trim(),
+    phone:(form.elements.phone.value||"").trim(),
+    taxId:(form.elements.taxId.value||"").trim(),
+    paymentTerms:(form.elements.paymentTerms.value||"").trim(),
+    address:(form.elements.address.value||"").trim(),
+    notes:(form.elements.notes.value||"").trim(),
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+    updatedByUid:currentUser.uid,updatedByName:currentUser.name
+  };
   try{
-    if(erpVendorEditingId) await db.collection("erpParties").doc(erpVendorEditingId).update(data);
-    else await db.collection("erpParties").add({...data,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});
-    erpAccountingAudit(erpVendorEditingId?"vendor_updated":"vendor_created",erpVendorEditingId||"new",{partyCode:code,name});
+    await db.runTransaction(async transaction=>{
+      // 交易規則：所有讀取都必須排在寫入之前。
+      let oldCode="";
+      if(editingId){
+        const partySnap=await transaction.get(partyRef);
+        if(!partySnap.exists) throw new Error("找不到廠商資料，請重新整理後再試。");
+        oldCode=normalizeVendorCode((partySnap.data()||{}).partyCode);
+      }
+      let code=requested,allocated=null;
+      if(!code) allocated=await allocateVendorCode(transaction,partyRef.id);
+      if(allocated) code=allocated.code;
+      const indexRef=allocated?allocated.indexRef:db.collection("erpPartyCodeIndex").doc(code);
+      if(!allocated){
+        const indexSnap=await transaction.get(indexRef);
+        if(indexSnap.exists&&indexSnap.data().partyId!==partyRef.id) throw new Error("編號「"+code+"」已被其他往來對象使用。");
+      }
+      const payload={...fields,partyCode:code};
+      if(editingId) transaction.set(partyRef,payload,{merge:true});
+      else transaction.set(partyRef,{...payload,active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdByUid:currentUser.uid,createdByName:currentUser.name});
+      transaction.set(indexRef,{partyId:partyRef.id,type:"vendor",updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+      if(allocated) transaction.set(allocated.counterRef,{nextNumber:allocated.nextNumber,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+      if(oldCode&&oldCode!==code) transaction.delete(db.collection("erpPartyCodeIndex").doc(oldCode));
+    });
+    erpAccountingAudit(editingId?"vendor_updated":"vendor_created",partyRef.id,{name});
     erpVendorEditingId=null;
+    renderErpVendors();
   }catch(error){
     console.error(error);
     alert("儲存廠商失敗："+(error.message||"請確認 Firebase Rules 權限。"));
