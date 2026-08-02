@@ -103,7 +103,7 @@ table.grid .loc-line.loc-expired{color:#a31e22;font-weight:700;}
 
 /* modal */
 .overlay{position:fixed;inset:0;background:rgba(20,20,20,.45);z-index:30;display:flex;align-items:flex-end;justify-content:center;overscroll-behavior:contain;}
-.sheet{background:#fff;width:100%;max-width:640px;max-height:86vh;max-height:86svh;overflow-y:auto;overscroll-behavior:contain;border-radius:16px 16px 0 0;padding:18px;}
+.sheet{background:#fff;width:100%;max-width:640px;max-height:86vh;max-height:86svh;overflow-y:auto;overscroll-behavior:contain;border-radius:16px 16px 0 0;padding:18px;padding-bottom:calc(18px + env(safe-area-inset-bottom));}
 @media (min-width:640px){.sheet{border-radius:16px;margin-bottom:40px;}}
 .sheet-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
 .sheet-head h2{font-size:15px;margin:0;}
@@ -115,6 +115,13 @@ table.grid .loc-line.loc-expired{color:#a31e22;font-weight:700;}
 .form-actions{display:flex;gap:8px;margin-top:14px;}
 .form-actions button{flex:1;padding:11px;border-radius:8px;border:1px solid var(--border);background:#fff;font-size:14px;cursor:pointer;}
 .form-actions button.primary{background:var(--red);border-color:var(--red);color:#fff;font-weight:600;}
+@media (max-width:480px){
+  .form-actions{flex-direction:column;}
+  .form-actions button{width:100%;}
+}
+
+/* 浮動購物車按鈕開著任何 modal 時要讓路，避免蓋住視窗裡的按鈕文字 */
+#modalOverlay:not(.hidden) ~ #orderCartFab{display:none !important;}
 
 .autocomplete-list{border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto;margin-top:-6px;margin-bottom:10px;background:#fff;}
 .autocomplete-list div{padding:8px 10px;font-size:13.5px;cursor:pointer;border-bottom:1px solid var(--border);}
